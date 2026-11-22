@@ -1,0 +1,16 @@
+# Build output
+.gradle/
+build/
+.kotlin/
+*.apk
+
+# Local machine
+local.properties
+.idea/
+*.iml
+.DS_Store
+
+# Generated or personal, not source
+design-shots/
+backups/
+_to_delete/

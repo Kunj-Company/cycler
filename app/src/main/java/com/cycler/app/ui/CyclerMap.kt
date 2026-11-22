@@ -1,0 +1,217 @@
+package com.cycler.app.ui
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.cycler.app.data.Pt
+import org.json.JSONArray
+import org.json.JSONObject
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
+import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
+import org.maplibre.android.style.layers.PropertyFactory
+import org.maplibre.android.style.sources.GeoJsonSource
+
+class MapLine(val pts: List<Pt>, val color: String, val width: Float = 5f)
+class MapDot(val pt: Pt, val color: String, val radius: Float = 7f)
+
+/** One point = centre on it (optionally with zoom); several = fit them all. A new instance moves the camera. */
+class CameraCmd(val pts: List<Pt>, val zoom: Double? = null)
+
+object MapStyles {
+    val all = listOf(
+        "liberty" to "Standard",
+        "bright" to "Bright",
+        "positron" to "Light",
+        "dark" to "Dark",
+        "cyclosm" to "CyclOSM (bike lanes, contours)",
+    )
+
+    fun builder(key: String): Style.Builder =
+        if (key == "cyclosm") Style.Builder().fromJson(CYCLOSM)
+        else Style.Builder().fromUri("https://tiles.openfreemap.org/styles/$key")
+
+    private val CYCLOSM = """
+        {"version":8,"sources":{"cyclosm":{"type":"raster","tiles":[
+        "https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png",
+        "https://b.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png",
+        "https://c.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png"],
+        "tileSize":256,"maxzoom":19,
+        "attribution":"© OpenStreetMap contributors · CyclOSM"}},
+        "layers":[{"id":"cyclosm","type":"raster","source":"cyclosm"}]}
+    """.trimIndent()
+}
+
+private const val SRC_LINES = "cycler-lines"
+private const val SRC_DOTS = "cycler-dots"
+
+private fun linesJson(lines: List<MapLine>): String {
+    val feats = JSONArray()
+    for (l in lines) {
+        if (l.pts.size < 2) continue
+        val coords = JSONArray()
+        for (p in l.pts) coords.put(JSONArray().put(p.lon).put(p.lat))
+        feats.put(
+            JSONObject().put("type", "Feature")
+                .put("properties", JSONObject().put("color", l.color).put("width", l.width.toDouble()))
+                .put("geometry", JSONObject().put("type", "LineString").put("coordinates", coords))
+        )
+    }
+    return JSONObject().put("type", "FeatureCollection").put("features", feats).toString()
+}
+
+private fun dotsJson(dots: List<MapDot>): String {
+    val feats = JSONArray()
+    for (d in dots) {
+        feats.put(
+            JSONObject().put("type", "Feature")
+                .put("properties", JSONObject().put("color", d.color).put("radius", d.radius.toDouble()))
+                .put("geometry", JSONObject().put("type", "Point")
+                    .put("coordinates", JSONArray().put(d.pt.lon).put(d.pt.lat)))
+        )
+    }
+    return JSONObject().put("type", "FeatureCollection").put("features", feats).toString()
+}
+
+@Composable
+fun CyclerMap(
+    modifier: Modifier,
+    styleKey: String,
+    lines: List<MapLine>,
+    dots: List<MapDot>,
+    camera: CameraCmd?,
+    initial: Pt? = null,
+    onLongPress: ((Pt) -> Unit)? = null,
+    onUserMove: (() -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val padPx = with(LocalDensity.current) { 56.dp.roundToPx() }
+    val mapView = remember { MapView(context).apply { onCreate(null) } }
+    var map by remember { mutableStateOf<MapLibreMap?>(null) }
+    var styleTick by remember { mutableIntStateOf(0) }
+    val longPress by rememberUpdatedState(onLongPress)
+    val userMove by rememberUpdatedState(onUserMove)
+
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, e ->
+            when (e) {
+                Lifecycle.Event.ON_START -> mapView.onStart()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                else -> {}
+            }
+        }
+        lifecycle.addObserver(obs)
+        onDispose {
+            lifecycle.removeObserver(obs)
+            mapView.onPause()
+            mapView.onStop()
+            mapView.onDestroy()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        mapView.getMapAsync { m ->
+            m.uiSettings.isLogoEnabled = false
+            m.uiSettings.isTiltGesturesEnabled = false
+            m.cameraPosition = CameraPosition.Builder()
+                .target(LatLng(initial?.lat ?: 20.6, initial?.lon ?: 78.9))
+                .zoom(if (initial != null) 13.0 else 3.5)
+                .build()
+            m.addOnMapLongClickListener { ll ->
+                longPress?.invoke(Pt(ll.latitude, ll.longitude))
+                longPress != null
+            }
+            m.addOnCameraMoveStartedListener { reason ->
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) userMove?.invoke()
+            }
+            map = m
+        }
+    }
+
+    LaunchedEffect(map, styleKey) {
+        val m = map ?: return@LaunchedEffect
+        m.setStyle(MapStyles.builder(styleKey)) { style ->
+            style.addSource(GeoJsonSource(SRC_LINES))
+            style.addSource(GeoJsonSource(SRC_DOTS))
+            style.addLayer(
+                LineLayer("cycler-lines-casing", SRC_LINES).withProperties(
+                    PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                    PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                    PropertyFactory.lineColor("#ffffff"),
+                    PropertyFactory.lineOpacity(0.8f),
+                    PropertyFactory.lineWidth(Expression.sum(Expression.get("width"), Expression.literal(3))),
+                )
+            )
+            style.addLayer(
+                LineLayer("cycler-lines", SRC_LINES).withProperties(
+                    PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                    PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                    PropertyFactory.lineColor(Expression.toColor(Expression.get("color"))),
+                    PropertyFactory.lineWidth(Expression.get("width")),
+                )
+            )
+            style.addLayer(
+                CircleLayer("cycler-dots", SRC_DOTS).withProperties(
+                    PropertyFactory.circleColor(Expression.toColor(Expression.get("color"))),
+                    PropertyFactory.circleRadius(Expression.get("radius")),
+                    PropertyFactory.circleStrokeColor("#ffffff"),
+                    PropertyFactory.circleStrokeWidth(2.5f),
+                )
+            )
+            styleTick++
+        }
+    }
+
+    LaunchedEffect(styleTick, lines) {
+        if (styleTick > 0) map?.style?.getSourceAs<GeoJsonSource>(SRC_LINES)?.setGeoJson(linesJson(lines))
+    }
+    LaunchedEffect(styleTick, dots) {
+        if (styleTick > 0) map?.style?.getSourceAs<GeoJsonSource>(SRC_DOTS)?.setGeoJson(dotsJson(dots))
+    }
+
+    LaunchedEffect(map, camera) {
+        val m = map ?: return@LaunchedEffect
+        val c = camera ?: return@LaunchedEffect
+        mapView.post {
+            runCatching {
+                if (c.pts.size == 1) {
+                    val ll = LatLng(c.pts[0].lat, c.pts[0].lon)
+                    val upd = if (c.zoom != null) CameraUpdateFactory.newLatLngZoom(ll, c.zoom)
+                    else CameraUpdateFactory.newLatLng(ll)
+                    m.animateCamera(upd, 600)
+                } else if (c.pts.size >= 2) {
+                    val b = LatLngBounds.Builder()
+                    for (p in c.pts) b.include(LatLng(p.lat, p.lon))
+                    m.animateCamera(CameraUpdateFactory.newLatLngBounds(b.build(), padPx), 600)
+                }
+            }
+        }
+    }
+
+    AndroidView(factory = { mapView }, modifier = modifier)
+}
