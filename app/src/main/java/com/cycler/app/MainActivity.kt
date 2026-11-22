@@ -91,6 +91,7 @@ import com.cycler.app.ui.RouteDetailScreen
 import com.cycler.app.ui.EditRideScreen
 import com.cycler.app.ui.RidesScreen
 import com.cycler.app.ui.SettingsScreen
+import com.cycler.app.widget.WidgetLaunch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -429,6 +430,21 @@ class MainActivity : ComponentActivity() {
                 App(vm)
             }
         }
+        // A tap on a home-screen widget. Not on a restored instance (rotation, back from recents): the
+        // intent then is the original launch one and must not start another ride.
+        if (savedInstanceState == null && ((intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
+            handleWidgetIntent(intent)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    private fun handleWidgetIntent(intent: Intent?) {
+        runCatching { WidgetLaunch.handle(this, intent, androidx.lifecycle.ViewModelProvider(this)[MainVm::class.java]) }
     }
 }
 
