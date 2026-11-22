@@ -22,6 +22,9 @@ Or install the prebuilt debug build directly:
   and vibrates if you leave the route.
 - **While following**: the next turn and its distance, a nudge before each turn, climbs
   coming up, traffic signals on the map, and a big-number screen for the handlebar.
+- **Laps and workouts**: a Lap button and optional auto-lap; interval workouts with
+  on-screen, vibration and spoken prompts for each block.
+- **Ride screen**: the big-number screen is swipeable pages of fields you choose.
 - **Plan → A to B**: Start and End fields, optional stops, search or long-press the map.
   Up to three routes with distance, climb, time, difficulty and an elevation profile.
 - **Plan → Loop**: pick a distance (5–200 km), get round trips in four directions.
@@ -40,6 +43,10 @@ Or install the prebuilt debug build directly:
   detail, worked out from the recorded points so it covers older rides too.
 - **Activity extras**: best efforts over 1, 5, 10, 20 and 40 km, all rides on one map,
   and bike care reminders by kilometres ridden.
+- **Segments**: cut a stretch from any ride; every ride over it is timed and ranked.
+- **Export**: FIT, TCX and GPX files, or hand a FIT file to Strava through the share sheet.
+- **Health Connect**: heart rate and weight from Samsung Health or other apps.
+- **Offline maps**: save the map around you for rides without signal.
 - **Settings**: appearance, map style, bike type, auto-pause and how quickly it kicks in,
   turn cues, off-route alert, spoken updates and how often, weekly goal, rider weight,
   and backup / restore of everything as one zip.
@@ -54,6 +61,12 @@ Or install the prebuilt debug build directly:
 
 These are shared community servers, fine for personal use. Maps, planning and weather
 need internet; recording does not.
+
+## Versions and Git
+
+Versions are numbered 0.1.N and tagged `v0.1.N`. Commits follow Conventional Commits
+(`feat`, `fix`, `build`, `test`, `docs`, `chore`), one topic per commit. `CHANGELOG.md`
+lists what each version added.
 
 ## Design
 
@@ -71,7 +84,9 @@ The map is drawn as a sketch there; real tiles only appear on a device.
 ## Where things live
 
 - `data/` models, geometry, JSON file storage, GPX
-- `net/Net.kt` BRouter, Photon and weather calls
+- `data/Export.kt` FIT and TCX writers
+- `health/Health.kt` Health Connect reads
+- `net/Net.kt` BRouter, Photon, weather and signals calls
 - `share/` the share card, the flyover renderer and the MP4 encoder
 - `track/TrackingService.kt` foreground GPS recording, auto-pause, off-route alerts
 - `ui/` theme, components, screens and the map wrapper

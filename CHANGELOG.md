@@ -1,0 +1,46 @@
+# Changelog
+
+All notable changes to Cycler. Versions are tagged in Git as `v0.1.N`.
+
+## 0.1.8
+
+### Added
+- Lap button, optional auto-lap, and a lap table on ride pages.
+- Interval workouts: presets and a custom builder, with prompts for each block.
+- Configurable big-number ride screen with swipeable pages.
+- Segments: cut one from a ride; every ride over it is timed and ranked.
+- FIT and TCX export, and sharing a FIT file to other apps.
+- Health Connect: heart rate for rides and rider weight.
+- Offline maps: download the area around you.
+
+### Changed
+- Build: Android Gradle Plugin 8.9.1, compileSdk 36.
+- Version numbers now use the 0.1.N form.
+
+## 0.1.7
+- Advanced stats on ride pages.
+- 13 share card styles with an editor; flyover video is map-only.
+- Plan tab: full-screen place search, start and end as one box, loop presets.
+- Settings regrouped; backup and restore of all data.
+
+## 0.1.6
+- Tabs: Ride, Plan, Rides, Activity. Rides feed.
+- Post-ride page: title, feeling, notes, tags, photos and videos.
+
+## 0.1.5
+- Turn cues, climb-ahead notes, traffic signals, big-number screen.
+- Flyover video and share card; photos and videos on rides.
+- Best efforts, all-rides map, bike care.
+
+## 0.1.4
+- Reliability fixes to recording, storage and route progress.
+- Sunset warning, wind hint, speed splits, map style switcher.
+
+## 0.1.3
+- Redesign; Activity tab; weather; auto-pause; off-route alerts.
+
+## 0.1.2
+- Route suggestions near you; Start and End fields in planning.
+
+## 0.1.1
+- First version: record, plan and save rides.
