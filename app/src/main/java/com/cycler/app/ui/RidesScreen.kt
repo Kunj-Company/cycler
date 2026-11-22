@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -35,8 +37,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +52,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -56,6 +64,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -67,6 +78,10 @@ import androidx.compose.ui.unit.dp
 import com.cycler.app.MainVm
 import com.cycler.app.Tab
 import com.cycler.app.data.Feeling
+import com.cycler.app.data.RideFilter
+import com.cycler.app.data.RideFilters
+import com.cycler.app.data.RidePeriod
+import com.cycler.app.data.RideSort
 import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteType
 import com.cycler.app.share.loadShareImage
@@ -126,35 +141,148 @@ fun MediaStrip(vm: MainVm, id: String, tile: Int = 68) {
     }
 }
 
-/** Your finished rides, newest first, each as a card. */
+/** Your finished rides as cards, with a period filter, sort, search and tags above them. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun RidesScreen(vm: MainVm) {
     val metas by vm.store.metas.collectAsState()
     val rides = remember(metas) { metas.filter { it.type == RouteType.RECORDED } }
+    val f = vm.rideFilter
+    var searchOpen by remember { mutableStateOf(f.query.isNotEmpty()) }
+    val shown = remember(rides, f) { RideFilters.apply(rides, f) }
+    val tags = remember(rides) { RideFilters.tagCounts(rides) }
+    var sortMenu by remember { mutableStateOf(false) }
+    var tagMenu by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(searchOpen) { if (searchOpen && f.query.isEmpty()) runCatching { focus.requestFocus() } }
+
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         item(key = "head") {
-            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 6.dp)) {
-                Text("Rides", style = MaterialTheme.typography.headlineMedium)
+            Column(Modifier.padding(start = 20.dp, end = 8.dp, top = 14.dp, bottom = 2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Rides", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                    if (rides.isNotEmpty()) {
+                        IconButton({
+                            if (searchOpen) vm.rideFilter = f.copy(query = "")
+                            searchOpen = !searchOpen
+                        }) {
+                            Icon(if (searchOpen) Icons.Outlined.Close else Icons.Outlined.Search, if (searchOpen) "Close search" else "Search rides")
+                        }
+                    }
+                }
                 if (rides.isEmpty()) {
-                    Text(
-                        "Your finished rides will appear here, with their photos and notes. Press Start on the Ride tab to record the first one.",
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 16.dp),
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    CyButton("Go to Ride", { vm.tab = Tab.RIDE }, kind = Btn.SECONDARY)
-                } else {
-                    Text(
-                        "${rides.size} ride${if (rides.size > 1) "s" else ""} · ${Fmt.km(rides.sumOf { it.distanceM })}",
-                        style = MaterialTheme.typography.bodySmall.tabular, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Column(Modifier.padding(end = 12.dp)) {
+                        Text(
+                            "Your finished rides will appear here, with their photos and notes. Press Start on the Ride tab to record the first one.",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 16.dp),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        CyButton("Go to Ride", { vm.tab = Tab.RIDE }, kind = Btn.SECONDARY)
+                    }
                 }
             }
         }
-        items(rides, key = { it.id }) { m ->
+        if (rides.isNotEmpty()) {
+            if (searchOpen) {
+                item(key = "search") {
+                    OutlinedTextField(
+                        f.query, { vm.rideFilter = f.copy(query = it) }, singleLine = true, shape = Radius,
+                        placeholder = { Text("Search name, notes and tags") },
+                        leadingIcon = { Icon(Icons.Outlined.Search, null, Modifier.size(20.dp)) },
+                        trailingIcon = {
+                            if (f.query.isNotEmpty()) IconButton({ vm.rideFilter = f.copy(query = "") }) { Icon(Icons.Outlined.Close, "Clear search", Modifier.size(20.dp)) }
+                        },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp).focusRequester(focus),
+                    )
+                }
+            }
+            stickyHeader(key = "filters") {
+                Column(Modifier.background(MaterialTheme.colorScheme.background)) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RidePeriod.values().forEach { p ->
+                        FilterPill(p.label, f.period == p, { vm.rideFilter = f.copy(period = p) })
+                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(start = 20.dp, end = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (shown.isEmpty()) "0 rides" else
+                            "${shown.size} ride${if (shown.size > 1) "s" else ""} · ${Fmt.km(shown.sumOf { it.distanceM })} · ${Fmt.dur(shown.sumOf { it.durationS })}",
+                        style = MaterialTheme.typography.bodySmall.tabular, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    if (tags.isNotEmpty()) {
+                        Box {
+                            MenuLabel(f.tag ?: "Tags", f.tag != null) { tagMenu = true }
+                            DropdownMenu(tagMenu, { tagMenu = false }, containerColor = MaterialTheme.colorScheme.surface) {
+                                DropdownMenuItem(
+                                    text = { Text("All tags", fontWeight = if (f.tag == null) FontWeight.SemiBold else null) },
+                                    onClick = { vm.rideFilter = f.copy(tag = null); tagMenu = false },
+                                )
+                                tags.forEach { (t, n) ->
+                                    DropdownMenuItem(
+                                        text = { Text("$t  ·  $n", fontWeight = if (t.equals(f.tag, true)) FontWeight.SemiBold else null) },
+                                        onClick = { vm.rideFilter = f.copy(tag = t); tagMenu = false },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Box {
+                        MenuLabel(f.sort.label, f.sort != RideSort.NEWEST) { sortMenu = true }
+                        DropdownMenu(sortMenu, { sortMenu = false }, containerColor = MaterialTheme.colorScheme.surface) {
+                            RideSort.values().forEach { s ->
+                                DropdownMenuItem(
+                                    text = { Text(s.label, fontWeight = if (s == f.sort) FontWeight.SemiBold else null) },
+                                    onClick = { vm.rideFilter = f.copy(sort = s); sortMenu = false },
+                                )
+                            }
+                        }
+                    }
+                }
+                }
+            }
+            if (shown.isEmpty()) {
+                item(key = "none") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 36.dp)) {
+                        Text("No rides match", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Nothing fits the period, search or tag you picked.",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        CyButton("Clear filters", {
+                            vm.rideFilter = RideFilter(sort = f.sort); searchOpen = false
+                        }, kind = Btn.SECONDARY)
+                    }
+                }
+            }
+        }
+        items(shown, key = { it.id }) { m ->
             RideCard(vm, m)
             Hairline(Modifier.padding(horizontal = 20.dp))
         }
+    }
+}
+
+/** A quiet text control with a small arrow, for the sort and tag menus. */
+@Composable
+private fun MenuLabel(text: String, active: Boolean, onClick: () -> Unit) {
+    val c = if (active) Cy.colors.accent else MaterialTheme.colorScheme.onSurface
+    Row(
+        Modifier.heightIn(min = 44.dp).clip(Radius).clickable(onClick = onClick).padding(start = 8.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, style = MaterialTheme.typography.labelLarge, color = c, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp))
+        Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp), tint = c)
     }
 }
 

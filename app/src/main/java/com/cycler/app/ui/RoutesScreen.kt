@@ -111,6 +111,9 @@ fun RouteRow(
     }
 }
 
+/** Order of the saved routes list: 0 newest, 1 shortest, 2 longest. Kept for the session. */
+private var routeSort by androidx.compose.runtime.mutableIntStateOf(0)
+
 @Composable
 fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
     val ctx = LocalContext.current
@@ -143,7 +146,12 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
     }
 
     // Finished rides live in the Rides tab; this list is for routes to ride.
-    val shown = metas.filter { it.type == RouteType.PLANNED }
+    val planned = metas.filter { it.type == RouteType.PLANNED }
+    val shown = when (routeSort) {
+        1 -> planned.sortedBy { it.distanceM }
+        2 -> planned.sortedByDescending { it.distanceM }
+        else -> planned.sortedByDescending { it.createdAt }
+    }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
         item(key = "head") {
@@ -197,6 +205,13 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
                     SectionLabel("Saved routes", Modifier.weight(1f))
                     TextButton({ importGpx.launch(arrayOf("*/*")) }) {
                         Text("Import GPX", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (planned.size > 1) {
+                    Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Newest", "Shortest", "Longest").forEachIndexed { i, label ->
+                            FilterPill(label, routeSort == i, { routeSort = i })
+                        }
                     }
                 }
                 if (shown.isEmpty()) {
