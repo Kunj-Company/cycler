@@ -2,7 +2,9 @@ package com.cycler.app.widget
 
 import android.content.Context
 import android.content.Intent
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.withResumed
 import com.cycler.app.MainVm
 import com.cycler.app.Tab
 import com.cycler.app.hasLocationPermission
@@ -53,8 +55,11 @@ object WidgetLaunch {
 
     /** Same checks and call as the Ride screen's Start button; without location permission it only shows the Ride tab. */
     private fun start(ctx: Context, vm: MainVm) {
-        if (!idle() || !hasLocationPermission(ctx)) return
+        // During first-launch setup the Location step asks for permission; never start a ride under it.
+        if (!vm.onboarded || !idle() || !hasLocationPermission(ctx)) return
         vm.viewModelScope.launch {
+            // Android only lets a location recording start while the app is on screen.
+            (ctx as? LifecycleOwner)?.lifecycle?.withResumed { }
             // A ride that was cut short last time is recovered when the app opens; let that finish first.
             val file = vm.store.recordingFile
             if (file.exists()) withTimeoutOrNull(5000) { while (file.exists()) delay(100) }
