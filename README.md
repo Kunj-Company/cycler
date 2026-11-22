@@ -33,12 +33,16 @@ Or install the prebuilt debug build directly:
   The same page edits a ride later.
 - **Activity**: this week against your goal, last 8 weeks, month and all-time totals, records.
 - **Ride page**: attach photos and videos, see stops, stopped time and signal count.
-- **Share**: an animated 3D flyover video of the ride (slow start, fast middle, slow end,
-  then your photos and a summary), or a still card. Both go to the system share sheet.
+- **Share**: an animated 3D flyover video of the ride's map (slow start, fast middle, slow
+  end), or a card in 13 swipeable styles: photo backgrounds, map backgrounds, a see-through
+  sticker and more. The card's title, numbers, photo and size can be edited.
+- **Advanced stats**: a switch on each ride page for speed, time, stop, elevation and effort
+  detail, worked out from the recorded points so it covers older rides too.
 - **Activity extras**: best efforts over 1, 5, 10, 20 and 40 km, all rides on one map,
   and bike care reminders by kilometres ridden.
-- **Settings**: light/dark, map style, bike type, auto-pause, off-route alert,
-  spoken updates every kilometre, weekly goal.
+- **Settings**: appearance, map style, bike type, auto-pause and how quickly it kicks in,
+  turn cues, off-route alert, spoken updates and how often, weekly goal, rider weight,
+  and backup / restore of everything as one zip.
 
 ## Services used (all free, no API keys)
 

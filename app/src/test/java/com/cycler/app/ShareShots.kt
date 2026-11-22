@@ -14,7 +14,6 @@ import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteType
 import com.cycler.app.share.FlyoverScene
 import com.cycler.app.share.Ground
-import com.cycler.app.share.ShareCard
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -73,29 +72,35 @@ class ShareShots {
         f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    @Test fun card_plain() = save(ShareCard.render(ctx, meta, pts, emptyList(), dark = false), "share_card_plain")
-
-    @Test fun card_photos_dark() = save(
-        ShareCard.render(
-            ctx, meta, pts,
-            listOf(fakePhoto(0xFF2B5876.toInt(), 0xFF4E4376.toInt()), fakePhoto(0xFFF7971E.toInt(), 0xFFFFD200.toInt()), fakePhoto(0xFF11998E.toInt(), 0xFF38EF7D.toInt())),
-            dark = true,
-        ),
-        "share_card_photos_dark",
-    )
+    /** Every card style, with photos and a stand-in map, so each layout can be checked. */
+    @Test fun card_styles() {
+        val photos = listOf(
+            fakePhoto(0xFF2B5876.toInt(), 0xFF4E4376.toInt()), fakePhoto(0xFFF7971E.toInt(), 0xFFFFD200.toInt()),
+            fakePhoto(0xFF11998E.toInt(), 0xFF38EF7D.toInt()),
+        )
+        val g = fakeGround()
+        val spec = com.cycler.app.share.CardSpec(meta.name)
+        com.cycler.app.share.CardStyle.entries.forEach { style ->
+            save(com.cycler.app.share.Cards.render(ctx, style, spec, meta, pts, photos, g, g, 0.5f), "card_%02d_%s".format(style.ordinal, style.name.lowercase()))
+        }
+        // A 4:5 post with fewer details, and a photo style with no photo, to check the edges.
+        val post = spec.copy(h = 1350, showDate = false, stats = listOf("distance", "max", "stops"))
+        save(com.cycler.app.share.Cards.render(ctx, com.cycler.app.share.CardStyle.PHOTO_ROUTE, post, meta, pts, photos, g, g, 0.5f), "card_post_photo_route")
+        save(com.cycler.app.share.Cards.render(ctx, com.cycler.app.share.CardStyle.MAP, post, meta, pts, photos, g, g, 0.5f), "card_post_map")
+        save(com.cycler.app.share.Cards.render(ctx, com.cycler.app.share.CardStyle.BIG, post, meta, pts, photos, g, g, 0.5f), "card_post_big")
+        save(com.cycler.app.share.Cards.render(ctx, com.cycler.app.share.CardStyle.POLAROID, spec, meta, pts, emptyList(), null, null, 0.5f), "card_nophoto_polaroid")
+    }
 
     @Test fun flyover_frames() {
-        val photos = listOf(fakePhoto(0xFF2B5876.toInt(), 0xFF4E4376.toInt()))
         for ((tag, ground, dark) in listOf(Triple("map", fakeGround(), false), Triple("grid", null, true))) {
-            val scene = FlyoverScene(ctx, meta, pts, photos, ground, dark)
+            val scene = FlyoverScene(ctx, meta, pts, ground, dark)
             val bmp = Bitmap.createBitmap(720, 1280, Bitmap.Config.ARGB_8888)
             val c = Canvas(bmp)
             val fly = scene.flyMs
             listOf(
                 "0_intro" to 300L, "1_dropin" to scene.introMs + fly / 9, "2_chase" to scene.introMs + fly / 3,
                 "3_mid" to scene.introMs + fly / 2, "4_late" to scene.introMs + fly * 3 / 4,
-                "5_pullout" to scene.introMs + fly * 19 / 20, "6_photo" to scene.introMs + fly + 800,
-                "7_end" to scene.durationMs - 200,
+                "5_pullout" to scene.introMs + fly * 19 / 20, "7_end" to scene.durationMs - 200,
             ).forEach { (name, t) ->
                 scene.draw(c, 720, 1280, t)
                 save(bmp, "share_fly_${tag}_$name")

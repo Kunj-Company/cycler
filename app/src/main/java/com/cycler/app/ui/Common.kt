@@ -411,3 +411,15 @@ fun Progress(fraction: Float, modifier: Modifier = Modifier, color: Color = Cy.c
 @Composable
 fun WithContentColor(color: Color, content: @Composable () -> Unit) =
     CompositionLocalProvider(LocalContentColor provides color, content = content)
+
+@Composable
+fun CySwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+    androidx.compose.material3.Switch(
+        checked, onChange,
+        colors = androidx.compose.material3.SwitchDefaults.colors(
+            checkedTrackColor = Cy.colors.accent, checkedThumbColor = Color.White,
+            uncheckedTrackColor = Cy.colors.subtle, uncheckedBorderColor = MaterialTheme.colorScheme.outline,
+            uncheckedThumbColor = MaterialTheme.colorScheme.outline,
+        ),
+    )
+}

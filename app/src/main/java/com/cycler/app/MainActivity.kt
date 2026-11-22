@@ -142,6 +142,11 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     var offRouteAlert by mutableStateOf(prefs.offRouteAlert)
     var voice by mutableStateOf(prefs.voice)
     var weeklyGoalKm by mutableIntStateOf(prefs.weeklyGoalKm)
+    var advanced by mutableStateOf(prefs.advancedStats)
+    var weightKg by mutableIntStateOf(prefs.weightKg)
+    var turnCues by mutableStateOf(prefs.turnCues)
+    var voiceEveryKm by mutableIntStateOf(prefs.voiceEveryKm)
+    var autoPauseLevel by mutableIntStateOf(prefs.autoPauseLevel)
 
     var weather by mutableStateOf<Weather.Now?>(null)
         internal set

@@ -144,4 +144,31 @@ class GeoTest {
         assertEquals(100.0, bests[1]!!.toDouble(), 12.0)
         assertTrue(20 !in bests)
     }
+
+    @Test fun ride_stats_cover_speed_stops_and_hills() {
+        // 6 km north at 36 km/h with a three-minute stop after 3 km, climbing 60 m then dropping 30 m.
+        var t = 1_000_000L
+        val pts = north(60).mapIndexed { i, p ->
+            if (i > 0) t += 10_000L               // 100 m every 10 s
+            if (i == 30) t += 180_000L            // the stop
+            p.copy(t = t, ele = 900.0 + if (i <= 40) i * 1.5 else 60.0 - (i - 40) * 1.5)
+        }
+        val meta = com.cycler.app.data.RouteMeta(
+            "x", "t", com.cycler.app.data.RouteType.RECORDED, pts.first().t, 6000.0, 60.0, 600, 0.0, 0.0,
+        )
+        val s = Geo.rideStats(pts, meta)
+        assertEquals(36.0, s.avgMovingKmh, 0.5)
+        assertEquals(1, s.stops)
+        assertTrue("longest stop ${s.longestStopS}", s.longestStopS in 180..195)
+        assertEquals(780.0, s.elapsedS.toDouble(), 15.0)
+        assertTrue("overall ${s.avgOverallKmh}", s.avgOverallKmh < s.avgMovingKmh)
+        assertEquals(36.0, s.maxKmh, 2.0)
+        assertEquals(960.0, s.highestM, 1.0)
+        assertEquals(900.0, s.lowestM, 1.0)
+        assertEquals(30.0, s.lossM, 8.0)
+        assertEquals(1.5, s.steepestUpPct, 0.4)
+        assertEquals(1.0, s.zones.sum(), 0.001)
+        assertEquals(1.0, s.zones[5], 0.05)   // all of it above 30 km/h
+        assertTrue(s.kcal(70) > 0)
+    }
 }

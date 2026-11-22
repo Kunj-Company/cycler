@@ -87,7 +87,121 @@ class Climb(val startM: Double, val endM: Double, val gainM: Double) {
     val gradePct: Double get() = if (lengthM > 0) gainM / lengthM * 100 else 0.0
 }
 
+/** Everything that can be worked out about a recorded ride from its points. */
+class RideStats(
+    val avgMovingKmh: Double, val avgOverallKmh: Double, val maxKmh: Double,
+    val fastestKmKmh: Double, val slowestKmKmh: Double,
+    val startT: Long, val endT: Long, val elapsedS: Long, val movingS: Long,
+    val stops: Int, val stoppedS: Long, val longestStopS: Long,
+    val gainM: Double, val lossM: Double, val highestM: Double, val lowestM: Double,
+    val steepestUpPct: Double, val steepestDownPct: Double, val longestClimb: Climb?,
+    /** Share of moving time in each speed band of [ZONES], adding up to 1. */
+    val zones: List<Double>,
+    val hasTimes: Boolean, val hasElevation: Boolean,
+) {
+    /** A rough energy estimate from speed and rider weight; real effort depends on wind, hills and bike. */
+    fun kcal(weightKg: Int): Int {
+        val met = when {
+            avgMovingKmh < 16 -> 4.0
+            avgMovingKmh < 19 -> 6.8
+            avgMovingKmh < 22 -> 8.0
+            avgMovingKmh < 25 -> 10.0
+            avgMovingKmh < 30 -> 12.0
+            else -> 15.8
+        }
+        return (met * weightKg * movingS / 3600.0).toInt()
+    }
+
+    companion object {
+        val ZONES = listOf("Under 10", "10–15", "15–20", "20–25", "25–30", "Over 30")
+    }
+}
+
 object Geo {
+    /** Elevation every [step] metres along a route, lightly smoothed. Null without elevation data. */
+    fun profile(route: List<Pt>, cum: DoubleArray, step: Double = 50.0): DoubleArray? {
+        val total = cum.lastOrNull() ?: return null
+        if (route.size < 2 || total < step * 2 || route.any { it.ele.isNaN() }) return null
+        val m = (total / step).toInt() + 1
+        val raw = DoubleArray(m)
+        var j = 0
+        for (k in 0 until m) {
+            val d = k * step
+            while (j < route.size - 2 && cum[j + 1] < d) j++
+            val span = (cum[j + 1] - cum[j]).coerceAtLeast(1e-6)
+            val t = ((d - cum[j]) / span).coerceIn(0.0, 1.0)
+            raw[k] = route[j].ele + t * (route[j + 1].ele - route[j].ele)
+        }
+        return DoubleArray(m) { k ->
+            var s = 0.0
+            var c = 0
+            for (q in maxOf(0, k - 2)..minOf(m - 1, k + 2)) { s += raw[q]; c++ }
+            s / c
+        }
+    }
+
+    /** The detailed numbers for a ride's "Advanced" section. Works on rides recorded by any version. */
+    fun rideStats(pts: List<Pt>, meta: RouteMeta): RideStats {
+        val cum = cumulative(pts)
+        val timed = pts.size >= 2 && pts.first().t > 0 && pts.last().t > pts.first().t
+        var movingMs = 0L
+        var stops = 0
+        var stoppedMs = 0L
+        var longest = 0L
+        val zoneMs = LongArray(RideStats.ZONES.size)
+        // Fastest sustained speed: best over any stretch of about ten seconds, so one bad GPS fix can't set it.
+        var maxKmh = 0.0
+        var w = 0
+        if (timed) for (i in 1 until pts.size) {
+            val dt = pts[i].t - pts[i - 1].t
+            val d = cum[i] - cum[i - 1]
+            if (dt <= 0) continue
+            val v = d / (dt / 1000.0)
+            if (dt >= 10_000 && v < 1.0) {
+                stops++; stoppedMs += dt; if (dt > longest) longest = dt
+            } else if (dt < 60_000) {
+                // Anything that isn't a stop counts as riding; very long gaps (a manual pause) are left out.
+                movingMs += dt
+                val kmh = v * 3.6
+                val z = when { kmh < 10 -> 0; kmh < 15 -> 1; kmh < 20 -> 2; kmh < 25 -> 3; kmh < 30 -> 4; else -> 5 }
+                zoneMs[z] += dt
+            }
+            while (pts[i].t - pts[w + 1].t >= 10_000 && w + 1 < i) w++
+            val span = pts[i].t - pts[w].t
+            if (span in 8_000..20_000) maxKmh = maxOf(maxKmh, (cum[i] - cum[w]) / (span / 1000.0) * 3.6)
+        }
+        val elapsed = if (timed) (pts.last().t - pts.first().t) / 1000 else meta.elapsedS
+        val moving = if (meta.durationS > 0) meta.durationS else movingMs / 1000
+        val km = splits(pts, 1000.0)
+        val prof = profile(pts, cum)
+        var up = 0.0
+        var down = 0.0
+        if (prof != null) for (k in 0 until prof.size - 2) {
+            val g = (prof[k + 2] - prof[k]) / 100.0 * 100.0
+            if (g > up) up = g
+            if (-g > down) down = -g
+        }
+        val eles = pts.map { it.ele }.filter { !it.isNaN() }
+        val zoneTotal = zoneMs.sum().coerceAtLeast(1)
+        return RideStats(
+            avgMovingKmh = if (moving > 0) meta.distanceM / moving * 3.6 else 0.0,
+            avgOverallKmh = if (elapsed > 0) meta.distanceM / elapsed * 3.6 else 0.0,
+            maxKmh = if (meta.maxSpeedMs > 0) meta.maxSpeedMs * 3.6 else maxKmh,
+            fastestKmKmh = km.maxOrNull() ?: 0.0, slowestKmKmh = km.minOrNull() ?: 0.0,
+            startT = if (timed) pts.first().t else meta.createdAt, endT = if (timed) pts.last().t else 0L,
+            elapsedS = elapsed, movingS = moving,
+            stops = maxOf(stops, meta.stops), stoppedS = if (timed) maxOf(stoppedMs / 1000, elapsed - moving) else 0L,
+            longestStopS = longest / 1000,
+            gainM = meta.ascentM,
+            lossM = ascent(pts.map { it.copy(ele = -it.ele) }, 4.0, smooth = meta.type == RouteType.RECORDED),
+            highestM = eles.maxOrNull() ?: 0.0, lowestM = eles.minOrNull() ?: 0.0,
+            steepestUpPct = up, steepestDownPct = down,
+            longestClimb = climbs(pts, cum).maxByOrNull { it.lengthM },
+            zones = zoneMs.map { it.toDouble() / zoneTotal },
+            hasTimes = timed, hasElevation = eles.size >= 2,
+        )
+    }
+
     /** Distances, in kilometres, for which best efforts are kept. */
     val EFFORTS = listOf(1, 5, 10, 20, 40)
 
@@ -120,24 +234,10 @@ object Geo {
     /** Climbs of at least 20 m gain over 300 m or more, averaging 2% or steeper. */
     fun climbs(route: List<Pt>, cum: DoubleArray): List<Climb> {
         val total = cum.lastOrNull() ?: return emptyList()
-        if (total < 300.0 || route.any { it.ele.isNaN() }) return emptyList()
+        if (total < 300.0) return emptyList()
         val step = 50.0
-        val m = (total / step).toInt() + 1
-        val raw = DoubleArray(m)
-        var j = 0
-        for (k in 0 until m) {
-            val d = k * step
-            while (j < route.size - 2 && cum[j + 1] < d) j++
-            val span = (cum[j + 1] - cum[j]).coerceAtLeast(1e-6)
-            val t = ((d - cum[j]) / span).coerceIn(0.0, 1.0)
-            raw[k] = route[j].ele + t * (route[j + 1].ele - route[j].ele)
-        }
-        val e = DoubleArray(m) { k ->
-            var s = 0.0
-            var c = 0
-            for (q in maxOf(0, k - 2)..minOf(m - 1, k + 2)) { s += raw[q]; c++ }
-            s / c
-        }
+        val e = profile(route, cum, step) ?: return emptyList()
+        val m = e.size
         val out = ArrayList<Climb>()
         fun record(lo: Int, hi: Int) {
             val gain = e[hi] - e[lo]

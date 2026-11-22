@@ -110,132 +110,13 @@ fun drawCover(c: Canvas, bmp: Bitmap, dst: RectF, zoom: Float = 1f, alpha: Int =
     c.restore()
 }
 
-/** A still image for sharing: photos if there are any, the route's shape, and the numbers. */
-object ShareCard {
-    fun render(ctx: Context?, meta: RouteMeta, pts: List<Pt>, photos: List<Bitmap>, dark: Boolean, w: Int = 1080, h: Int = 1920): Bitmap {
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        draw(Canvas(bmp), ShareStyle(ctx, dark), meta, pts, photos, w, h, 1f)
-        return bmp
-    }
-
-    fun draw(c: Canvas, st: ShareStyle, meta: RouteMeta, pts: List<Pt>, photos: List<Bitmap>, w: Int, h: Int, alpha: Float) {
-        val u = w / 1080f
-        val layer = if (alpha < 1f) c.saveLayerAlpha(0f, 0f, w.toFloat(), h.toFloat(), (alpha * 255).toInt()) else -1
-        c.drawColor(st.bg)
-        val pad = 72f * u
-        var top = 0f
-
-        // Photos across the top, as a collage.
-        val shots = photos.take(4)
-        if (shots.isNotEmpty()) {
-            val ph = h * 0.42f
-            val gap = 6f * u
-            val cells = when (shots.size) {
-                1 -> listOf(RectF(0f, 0f, w.toFloat(), ph))
-                2 -> listOf(RectF(0f, 0f, w / 2f - gap / 2, ph), RectF(w / 2f + gap / 2, 0f, w.toFloat(), ph))
-                3 -> listOf(
-                    RectF(0f, 0f, w * 0.62f - gap / 2, ph),
-                    RectF(w * 0.62f + gap / 2, 0f, w.toFloat(), ph / 2 - gap / 2),
-                    RectF(w * 0.62f + gap / 2, ph / 2 + gap / 2, w.toFloat(), ph),
-                )
-                else -> listOf(
-                    RectF(0f, 0f, w / 2f - gap / 2, ph / 2 - gap / 2), RectF(w / 2f + gap / 2, 0f, w.toFloat(), ph / 2 - gap / 2),
-                    RectF(0f, ph / 2 + gap / 2, w / 2f - gap / 2, ph), RectF(w / 2f + gap / 2, ph / 2 + gap / 2, w.toFloat(), ph),
-                )
-            }
-            shots.forEachIndexed { i, b -> drawCover(c, b, cells[i]) }
-            top = ph
-        }
-
-        // Title block.
-        var y = top + 120f * u
-        c.drawText(if (meta.type == RouteType.RECORDED) "RIDE" else "ROUTE", pad, y, st.text(30f * u, st.muted, true).apply { letterSpacing = 0.12f })
-        y += 84f * u
-        val title = st.text(72f * u, st.ink, true)
-        var name = meta.name
-        while (title.measureText(name) > w - pad * 2 && name.length > 4) name = name.dropLast(2)
-        if (name != meta.name) name = name.trimEnd() + "…"
-        c.drawText(name, pad, y, title)
-        y += 56f * u
-        c.drawText(ShareFmt.date(meta.createdAt), pad, y, st.text(36f * u, st.muted))
-
-        // Numbers along the bottom.
-        val statsTop = h - 430f * u
-        val avg = if (meta.durationS > 0) meta.distanceM / meta.durationS * 3.6 else 0.0
-        val stats = listOf(
-            Triple("DISTANCE", ShareFmt.km(meta.distanceM), "km"),
-            Triple(if (meta.type == RouteType.RECORDED) "MOVING TIME" else "EST. TIME", ShareFmt.dur(meta.durationS), ShareFmt.durUnit(meta.durationS)),
-            Triple("CLIMB", meta.ascentM.toInt().toString(), "m"),
-            Triple(if (meta.type == RouteType.RECORDED) "AVG SPEED" else "PACE", String.format(Locale.US, "%.1f", avg), "km/h"),
-        )
-        val colW = (w - pad * 2) / 2
-        stats.forEachIndexed { i, (label, value, unit) ->
-            val x = pad + (i % 2) * colW
-            val sy = statsTop + (i / 2) * 170f * u
-            c.drawText(label, x, sy, st.text(28f * u, st.muted, true).apply { letterSpacing = 0.1f })
-            val vp = st.text(84f * u, st.ink, true)
-            c.drawText(value, x, sy + 88f * u, vp)
-            c.drawText(unit, x + vp.measureText(value) + 12f * u, sy + 88f * u, st.text(36f * u, st.muted))
-        }
-        c.drawRect(pad, statsTop - 64f * u, w - pad, statsTop - 62f * u, Paint().apply { color = st.hair })
-
-        // The route's shape fills what is left in the middle.
-        val box = RectF(pad, y + 60f * u, w - pad, statsTop - 110f * u)
-        drawOutline(c, pts, box, st.track, 9f * u, st)
-
-        val foot = st.text(30f * u, st.muted, true)
-        c.drawText("Cycler", pad, h - 70f * u, foot)
-        if (layer >= 0) c.restoreToCount(layer)
-    }
-
-    fun drawOutline(c: Canvas, pts: List<Pt>, box: RectF, color: Int, width: Float, st: ShareStyle) {
-        if (pts.size < 2 || box.height() < 40f) return
-        val minLat = pts.minOf { it.lat }
-        val maxLat = pts.maxOf { it.lat }
-        val minLon = pts.minOf { it.lon }
-        val maxLon = pts.maxOf { it.lon }
-        val kx = cos(Math.toRadians((minLat + maxLat) / 2))
-        val rw = ((maxLon - minLon) * kx).coerceAtLeast(1e-6)
-        val rh = (maxLat - minLat).coerceAtLeast(1e-6)
-        val s = min(box.width() / rw, box.height() / rh)
-        val ox = box.left + (box.width() - rw * s).toFloat() / 2
-        val oy = box.top + (box.height() - rh * s).toFloat() / 2
-        val step = max(1, pts.size / 600)
-        val path = Path()
-        var first = true
-        var lx = 0f
-        var ly = 0f
-        pts.forEachIndexed { i, p ->
-            if (i % step != 0 && i != pts.size - 1) return@forEachIndexed
-            lx = (ox + (p.lon - minLon) * kx * s).toFloat()
-            ly = (oy + (maxLat - p.lat) * s).toFloat()
-            if (first) { path.moveTo(lx, ly); first = false } else path.lineTo(lx, ly)
-        }
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = width; this.color = color
-            strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
-        }
-        c.drawPath(path, paint)
-        val p0 = pts.first()
-        val dot = Paint(Paint.ANTI_ALIAS_FLAG)
-        dot.color = st.bg
-        c.drawCircle((ox + (p0.lon - minLon) * kx * s).toFloat(), (oy + (maxLat - p0.lat) * s).toFloat(), width * 1.7f, dot)
-        dot.color = st.ink
-        c.drawCircle((ox + (p0.lon - minLon) * kx * s).toFloat(), (oy + (maxLat - p0.lat) * s).toFloat(), width * 1.1f, dot)
-        dot.color = st.bg
-        c.drawCircle(lx, ly, width * 1.7f, dot)
-        dot.color = color
-        c.drawCircle(lx, ly, width * 1.1f, dot)
-    }
-}
-
 /** A map image laid flat as the ground of the flyover. */
 class Ground(val bitmap: Bitmap, val centerLat: Double, val centerLon: Double, val metresPerPx: Double)
 
 /**
  * The animated 3D flyover. A camera starts high above the whole route, drops in
  * behind the rider, follows the route — slowly at first, fast in the middle,
- * slowly again at the end — then pulls back out. Photos and a summary follow.
+ * slowly again at the end — then pulls back out to show the whole ride.
  *
  * Everything is drawn with plain Canvas calls so the same code makes the
  * in-app preview and the exported video.
@@ -244,7 +125,6 @@ class FlyoverScene(
     ctx: Context?,
     private val meta: RouteMeta,
     private val raw: List<Pt>,
-    private val photos: List<Bitmap>,
     private val ground: Ground?,
     dark: Boolean,
 ) {
@@ -265,8 +145,8 @@ class FlyoverScene(
     private val totalM: Double
 
     val flyMs: Long
-    val photoMs = 1700L
-    val endMs = 2600L
+    /** The final wide view is held for a moment so the totals can be read. */
+    val endMs = 1500L
     val introMs = 900L
     val durationMs: Long
 
@@ -315,7 +195,7 @@ class FlyoverScene(
             gains[i] = gain
         }
         flyMs = (6500 + totalM / 1000 * 110).toLong().coerceIn(7000, 14000)
-        durationMs = introMs + flyMs + photos.size * photoMs + endMs
+        durationMs = introMs + flyMs + endMs
     }
 
     private fun ease(u: Float): Float {
@@ -378,44 +258,7 @@ class FlyoverScene(
 
     fun draw(c: Canvas, w: Int, h: Int, tMs: Long) {
         val t = tMs.coerceIn(0, durationMs)
-        val flyEnd = introMs + flyMs
-        val photosEnd = flyEnd + photos.size * photoMs
-        when {
-            t < flyEnd + 350 -> {
-                drawFly(c, w, h, ((t - introMs).toFloat() / flyMs).coerceIn(0f, 1f), (t.toFloat() / introMs).coerceIn(0f, 1f))
-                // Fade into whatever comes next.
-                if (t > flyEnd) {
-                    val a = (t - flyEnd) / 350f
-                    if (photos.isNotEmpty()) drawPhoto(c, w, h, 0, 0f, a) else ShareCard.draw(c, st, meta, raw, photos, w, h, a)
-                }
-            }
-            t < photosEnd -> {
-                val k = ((t - flyEnd) / photoMs).toInt().coerceAtMost(photos.size - 1)
-                val local = (t - flyEnd - k * photoMs).toFloat() / photoMs
-                drawPhoto(c, w, h, k, local, 1f)
-                val fade = 0.82f
-                if (local > fade) {
-                    val a = (local - fade) / (1 - fade)
-                    if (k + 1 < photos.size) drawPhoto(c, w, h, k + 1, 0f, a) else ShareCard.draw(c, st, meta, raw, photos, w, h, a)
-                }
-            }
-            else -> ShareCard.draw(c, st, meta, raw, photos, w, h, 1f)
-        }
-    }
-
-    private fun drawPhoto(c: Canvas, w: Int, h: Int, k: Int, local: Float, alpha: Float) {
-        val layer = if (alpha < 1f) c.saveLayerAlpha(0f, 0f, w.toFloat(), h.toFloat(), (alpha * 255).toInt()) else -1
-        c.drawColor(Color.BLACK)
-        drawCover(c, photos[k], RectF(0f, 0f, w.toFloat(), h.toFloat()), 1f + 0.07f * local)
-        // A soft shade at the bottom for the caption.
-        fill.shader = LinearGradient(0f, h * 0.7f, 0f, h.toFloat(), Color.TRANSPARENT, Color.argb(170, 0, 0, 0), Shader.TileMode.CLAMP)
-        c.drawRect(0f, h * 0.7f, w.toFloat(), h.toFloat(), fill)
-        fill.shader = null
-        val u = w / 1080f
-        val p = st.text(44f * u, Color.WHITE, true)
-        c.drawText(meta.name, 72f * u, h - 130f * u, p)
-        c.drawText(ShareFmt.date(meta.createdAt), 72f * u, h - 76f * u, st.text(32f * u, Color.argb(220, 255, 255, 255)))
-        if (layer >= 0) c.restoreToCount(layer)
+        drawFly(c, w, h, ((t - introMs).toFloat() / flyMs).coerceIn(0f, 1f), (t.toFloat() / introMs).coerceIn(0f, 1f))
     }
 
     private fun drawFly(c: Canvas, w: Int, h: Int, u: Float, intro: Float) {

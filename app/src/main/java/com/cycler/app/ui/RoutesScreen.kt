@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -314,6 +315,17 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                             Metric("Signals", signals?.size?.toString() ?: "…")
                         }
 
+                        // The full set of numbers, behind a switch so the page stays calm by default.
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            Modifier.fillMaxWidth().clip(Radius).clickable { vm.advanced = !vm.advanced; vm.prefs.advancedStats = vm.advanced },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("Advanced stats", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                            CySwitch(vm.advanced) { vm.advanced = it; vm.prefs.advancedStats = it }
+                        }
+                        if (vm.advanced && r != null) AdvancedStats(vm, r)
+
                         // What the rider wrote afterwards.
                         if (meta.notes.isNotBlank() || meta.tags.isNotEmpty()) {
                             Spacer(Modifier.height(14.dp))
@@ -389,5 +401,88 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                 TextButton({ confirmDelete = false }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             },
         )
+    }
+}
+
+@Composable
+private fun AdvancedStats(vm: MainVm, r: Route) {
+    val meta = r.meta
+    val st by produceState<com.cycler.app.data.RideStats?>(null, r) {
+        value = withContext(Dispatchers.Default) { Geo.rideStats(r.pts, meta) }
+    }
+    val s = st ?: return
+    val recorded = meta.type == RouteType.RECORDED
+    fun kmh(v: Double) = if (v > 0) String.format(java.util.Locale.US, "%.1f km/h", v) else "–"
+    fun clock(t: Long) = if (t > 0) java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(t)) else "–"
+    fun short(sec: Long) = if (sec >= 60) Fmt.dur(sec) else "$sec s"
+
+    if (recorded && s.hasTimes) {
+        StatGroup("Speed", listOf(
+            "Average, moving" to kmh(s.avgMovingKmh), "Average, with stops" to kmh(s.avgOverallKmh),
+            "Top speed" to kmh(s.maxKmh), "Fastest kilometre" to kmh(s.fastestKmKmh),
+            "Slowest kilometre" to kmh(s.slowestKmKmh),
+        ))
+        StatGroup("Time", listOf(
+            "Started" to clock(s.startT), "Finished" to clock(s.endT),
+            "Total time" to Fmt.dur(s.elapsedS), "Moving time" to Fmt.dur(s.movingS),
+            "Stopped time" to short(s.stoppedS), "Stops" to "${s.stops}",
+            "Longest stop" to if (s.longestStopS > 0) short(s.longestStopS) else "–",
+        ))
+    }
+    if (s.hasElevation) {
+        StatGroup("Elevation", listOf(
+            "Climbed" to "${s.gainM.toInt()} m", "Descended" to "${s.lossM.toInt()} m",
+            "Highest point" to "${s.highestM.toInt()} m", "Lowest point" to "${s.lowestM.toInt()} m",
+            "Steepest climb" to String.format(java.util.Locale.US, "%.1f%%", s.steepestUpPct),
+            "Steepest descent" to String.format(java.util.Locale.US, "%.1f%%", s.steepestDownPct),
+            "Longest climb" to (s.longestClimb?.let { "${Fmt.km(it.lengthM)} at ${String.format(java.util.Locale.US, "%.1f", it.gradePct)}%" } ?: "None"),
+        ))
+    }
+    if (recorded && s.hasTimes) {
+        val efforts = meta.bests.entries.sortedBy { it.key }.map { "Best ${it.key} km" to Fmt.clock(it.value * 1000) }
+        StatGroup("Effort", listOf(
+            "Energy, estimated" to if (vm.weightKg > 0) "${s.kcal(vm.weightKg)} kcal" else "Set your weight in Settings",
+        ) + efforts)
+
+        Spacer(Modifier.height(16.dp))
+        SectionLabel("Time at each speed, km/h")
+        Spacer(Modifier.height(6.dp))
+        val top = s.zones.max().coerceAtLeast(0.01)
+        com.cycler.app.data.RideStats.ZONES.forEachIndexed { i, label ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = MaterialTheme.typography.bodySmall.tabular, modifier = Modifier.width(72.dp))
+                Box(Modifier.weight(1f).height(10.dp)) {
+                    Box(
+                        Modifier.fillMaxWidth((s.zones[i] / top).toFloat().coerceIn(0.01f, 1f)).height(10.dp).clip(Radius)
+                            .background(if (s.zones[i] == s.zones.max()) Cy.colors.accent else MaterialTheme.colorScheme.onSurface),
+                    )
+                }
+                Text(
+                    "${(s.zones[i] * 100).toInt()}%", style = MaterialTheme.typography.bodySmall.tabular,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(44.dp),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                )
+            }
+        }
+    }
+}
+
+/** A titled list of label and value pairs, two to a row. */
+@Composable
+private fun StatGroup(title: String, items: List<Pair<String, String>>) {
+    Spacer(Modifier.height(16.dp))
+    SectionLabel(title)
+    Spacer(Modifier.height(4.dp))
+    items.chunked(2).forEach { pair ->
+        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            pair.forEach { (label, value) ->
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(value, style = MaterialTheme.typography.titleSmall.tabular)
+                }
+            }
+            if (pair.size == 1) Spacer(Modifier.weight(1f))
+        }
+        Hairline()
     }
 }

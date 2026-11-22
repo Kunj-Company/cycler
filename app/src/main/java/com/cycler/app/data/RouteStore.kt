@@ -148,6 +148,59 @@ class RouteStore private constructor(ctx: Context) {
         _mediaTick.value++
     }
 
+    /**
+     * Everything the app holds, as one zip: the ride and route files, attached photos and
+     * videos, and a GPX copy of every route that other apps can open.
+     */
+    fun exportAll(out: java.io.OutputStream): Int {
+        var count = 0
+        java.util.zip.ZipOutputStream(out).use { zip ->
+            fun add(name: String, bytes: ByteArray) {
+                zip.putNextEntry(java.util.zip.ZipEntry(name)); zip.write(bytes); zip.closeEntry()
+            }
+            dir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.forEach { add("routes/${it.name}", it.readBytes()) }
+            mediaRoot.listFiles()?.filter { it.isDirectory }?.forEach { d ->
+                d.listFiles()?.filter { it.isFile }?.forEach { f ->
+                    zip.putNextEntry(java.util.zip.ZipEntry("media/${d.name}/${f.name}"))
+                    f.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+            }
+            _metas.value.forEach { m ->
+                load(m.id)?.let { r ->
+                    val safe = m.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "route" }
+                    add("gpx/$safe-${m.id.take(6)}.gpx", Gpx.write(r).toByteArray())
+                    count++
+                }
+            }
+        }
+        return count
+    }
+
+    /** Bring back rides from a backup zip made by [exportAll]. Existing rides are kept. Returns how many files were restored. */
+    fun importAll(input: java.io.InputStream): Int {
+        val root = dir.parentFile ?: return 0
+        val base = root.canonicalPath + File.separator
+        var n = 0
+        java.util.zip.ZipInputStream(input).use { zip ->
+            while (true) {
+                val e = zip.nextEntry ?: break
+                val wanted = e.name.startsWith("routes/") || e.name.startsWith("media/")
+                val target = File(root, e.name)
+                // Only files that land inside the app's own folder are accepted.
+                if (!e.isDirectory && wanted && target.canonicalPath.startsWith(base)) {
+                    target.parentFile?.mkdirs()
+                    target.outputStream().use { zip.copyTo(it) }
+                    n++
+                }
+                zip.closeEntry()
+            }
+        }
+        reload()
+        _mediaTick.value++
+        return n
+    }
+
     /** If the app died mid-ride, turn the leftover points into a saved ride. */
     fun recoverUnfinished(): String? {
         if (!recordingFile.exists()) return null
@@ -253,6 +306,25 @@ class Prefs(ctx: Context) {
     var weeklyGoalKm: Int
         get() = sp.getInt("weeklyGoalKm", 50)
         set(v) = sp.edit().putInt("weeklyGoalKm", v).apply()
+    /** Whether ride pages open with the detailed numbers showing. */
+    var advancedStats: Boolean
+        get() = sp.getBoolean("advancedStats", false)
+        set(v) = sp.edit().putBoolean("advancedStats", v).apply()
+    /** Rider weight in kilograms, for the calorie estimate. 0 means not set. */
+    var weightKg: Int
+        get() = sp.getInt("weightKg", 0)
+        set(v) = sp.edit().putInt("weightKg", v).apply()
+    var turnCues: Boolean
+        get() = sp.getBoolean("turnCues", true)
+        set(v) = sp.edit().putBoolean("turnCues", v).apply()
+    /** Speak an update every this many kilometres. */
+    var voiceEveryKm: Int
+        get() = sp.getInt("voiceEveryKm", 1)
+        set(v) = sp.edit().putInt("voiceEveryKm", v).apply()
+    /** How quickly auto-pause kicks in: 0 relaxed, 1 normal, 2 quick. */
+    var autoPauseLevel: Int
+        get() = sp.getInt("autoPauseLevel", 1)
+        set(v) = sp.edit().putInt("autoPauseLevel", v).apply()
     /** Bike parts being tracked for wear: name, service interval in km, and when last reset. */
     var care: List<CareItem>
         get() {

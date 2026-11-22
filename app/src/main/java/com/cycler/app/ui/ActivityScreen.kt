@@ -45,6 +45,7 @@ import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteType
 import com.cycler.app.net.BRouter
 import java.util.Calendar
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 object Stats {
@@ -246,6 +247,36 @@ private fun RecordRow(label: String, value: String, m: RouteMeta, onClick: () ->
 @Composable
 fun SettingsScreen(vm: MainVm) {
     val ctx = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun toast(msg: String) = android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_LONG).show()
+    fun openAppSettings() {
+        runCatching {
+            ctx.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
+    val backup = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { vm.store.exportAll(it) } }.getOrNull()
+            }
+            toast(if (n != null) "Backed up $n rides and routes" else "Couldn't write the backup")
+        }
+    }
+    val restore = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { ctx.contentResolver.openInputStream(uri)!!.use { vm.store.importAll(it) } }.getOrNull()
+            }
+            toast(if (n != null && n > 0) "Restored $n files from the backup" else "That file isn't a Cycler backup")
+        }
+    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())) {
             Row(Modifier.padding(start = 6.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -271,68 +302,88 @@ fun SettingsScreen(vm: MainVm) {
                     CheckRow(label, vm.profile == key) { vm.profile = key; vm.prefs.profile = key }
                 }
 
-                Group("Riding")
+                Group("Recording")
                 ToggleRow("Auto-pause", "Stop the clock when you stop at a signal or for a break.", vm.autoPause) {
                     vm.autoPause = it; vm.prefs.autoPause = it
                 }
-                ToggleRow("Off-route alert", "Vibrate when you leave the route you are following.", vm.offRouteAlert) {
-                    vm.offRouteAlert = it; vm.prefs.offRouteAlert = it
-                }
-                ToggleRow("Spoken updates", "Say distance and average speed at every kilometre.", vm.voice) {
-                    vm.voice = it; vm.prefs.voice = it
+                if (vm.autoPause) {
+                    SettingLabel("How quickly to pause", "Quick pauses after about 2 seconds stopped, Relaxed after 8.")
+                    Segmented(
+                        listOf("Relaxed", "Normal", "Quick"), vm.autoPauseLevel,
+                        { vm.autoPauseLevel = it; vm.prefs.autoPauseLevel = it }, Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    )
+                    Hairline()
                 }
                 ToggleRow("Keep screen on", "Recording continues with the screen off either way.", vm.keepScreenOn) {
                     vm.keepScreenOn = it; vm.prefs.keepScreenOn = it
                 }
-                Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Weekly goal", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "Shown on the Ride and Activity tabs.", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    fun set(v: Int) { val g = v.coerceIn(10, 500); vm.weeklyGoalKm = g; vm.prefs.weeklyGoalKm = g }
-                    CyButton("−", { set(vm.weeklyGoalKm - 10) }, Modifier.width(44.dp), Btn.SECONDARY, height = 36.dp)
-                    Text(
-                        "${vm.weeklyGoalKm} km", style = MaterialTheme.typography.titleMedium.tabular,
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                    )
-                    CyButton("+", { set(vm.weeklyGoalKm + 10) }, Modifier.width(44.dp), Btn.SECONDARY, height = 36.dp)
+
+                Group("Following a route")
+                ToggleRow("Turn cues", "A short vibration, and a spoken cue if speech is on, before each turn.", vm.turnCues) {
+                    vm.turnCues = it; vm.prefs.turnCues = it
                 }
-                Hairline()
+                ToggleRow("Off-route alert", "A longer vibration when you leave the route.", vm.offRouteAlert) {
+                    vm.offRouteAlert = it; vm.prefs.offRouteAlert = it
+                }
+
+                Group("Spoken updates")
+                ToggleRow("Speak while riding", "Distance and average speed read aloud, plus turn cues.", vm.voice) {
+                    vm.voice = it; vm.prefs.voice = it
+                }
+                if (vm.voice) {
+                    SettingLabel("How often", null)
+                    val steps = listOf(1, 2, 5, 10)
+                    Segmented(
+                        steps.map { "Every $it km" }, steps.indexOf(vm.voiceEveryKm).coerceAtLeast(0),
+                        { vm.voiceEveryKm = steps[it]; vm.prefs.voiceEveryKm = steps[it] }, Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    )
+                    Hairline()
+                }
+
+                Group("You")
+                StepperRow("Weekly goal", "Shown on the Ride and Activity tabs.", "${vm.weeklyGoalKm} km",
+                    { val g = (vm.weeklyGoalKm - 10).coerceIn(10, 500); vm.weeklyGoalKm = g; vm.prefs.weeklyGoalKm = g },
+                    { val g = (vm.weeklyGoalKm + 10).coerceIn(10, 500); vm.weeklyGoalKm = g; vm.prefs.weeklyGoalKm = g })
+                StepperRow("Your weight", "Only used to estimate energy burned. Stays on this phone.",
+                    if (vm.weightKg > 0) "${vm.weightKg} kg" else "Not set",
+                    { val w = if (vm.weightKg == 0) 70 else (vm.weightKg - 1).coerceIn(30, 200); vm.weightKg = w; vm.prefs.weightKg = w },
+                    { val w = if (vm.weightKg == 0) 70 else (vm.weightKg + 1).coerceIn(30, 200); vm.weightKg = w; vm.prefs.weightKg = w })
+                ToggleRow("Advanced stats", "Open ride pages with the detailed numbers showing.", vm.advanced) {
+                    vm.advanced = it; vm.prefs.advancedStats = it
+                }
+
+                Group("Your data", "Everything lives on this phone only. Keep a backup somewhere else.")
+                LinkRow("Back up everything", "One zip with all rides, routes, photos and a GPX copy of each.") {
+                    backup.launch("cycler-backup-" + java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date()) + ".zip")
+                }
+                LinkRow("Restore from a backup", "Adds the rides from a backup zip. Nothing already here is removed.") {
+                    restore.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                }
 
                 Group("Phone")
-                Row(
-                    Modifier.fillMaxWidth().clickable {
-                        runCatching {
-                            ctx.startActivity(
-                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName))
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    }.padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Background recording", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "If rides stop recording with the screen off, open this and set Battery to Unrestricted.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                LinkRow("Battery and background", "If rides stop recording with the screen off, set Battery to Unrestricted here.") { openAppSettings() }
+                LinkRow("Location permission", "Cycler needs Precise location, allowed while using the app.") { openAppSettings() }
+                LinkRow("Notifications", "The recording notification is what keeps a ride alive in the background.") {
+                    runCatching {
+                        ctx.startActivity(
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         )
                     }
-                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Hairline()
 
                 Group("About")
                 Text(
                     "Cycler keeps everything on this phone: no account, no cloud. " +
                         "Maps, planning and weather need an internet connection; recording a ride does not.\n\n" +
                         "Map data © OpenStreetMap contributors. Map tiles by OpenFreeMap and CyclOSM. " +
-                        "Routing and elevation by BRouter. Place search by Photon. Weather by Open-Meteo.",
+                        "Routing and elevation by BRouter. Place search by Photon. Weather by Open-Meteo. Signals via Overpass.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 28.dp),
+                )
+                Text(
+                    "Version " + (runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: ""),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 28.dp),
                 )
             }
         }
@@ -418,4 +469,38 @@ fun HeatmapScreen(vm: MainVm) {
             }
         }
     }
+}
+
+@Composable
+private fun SettingLabel(title: String, note: String?) {
+    Column(Modifier.padding(top = 10.dp, bottom = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.bodyLarge)
+        if (note != null) Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun StepperRow(title: String, note: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        CyButton("−", onMinus, Modifier.width(44.dp), Btn.SECONDARY, height = 36.dp)
+        Text(value, style = MaterialTheme.typography.titleMedium.tabular, modifier = Modifier.padding(horizontal = 10.dp))
+        CyButton("+", onPlus, Modifier.width(44.dp), Btn.SECONDARY, height = 36.dp)
+    }
+    Hairline()
+}
+
+@Composable
+private fun LinkRow(title: String, note: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Hairline()
 }

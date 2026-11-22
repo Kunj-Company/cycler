@@ -97,6 +97,9 @@ class TrackingService : Service(), LocationListener {
     /** Off-route alerts only start once the rider has actually been on the route. */
     private var onRouteSeen = false
     private var lastCued: Turn? = null
+    private var turnCuesOn = true
+    private var voiceEveryKm = 1
+    private var pauseAfterMs = 4000L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -146,6 +149,9 @@ class TrackingService : Service(), LocationListener {
         val prefs = Prefs(this)
         autoPauseOn = prefs.autoPause
         offRouteAlertOn = prefs.offRouteAlert
+        turnCuesOn = prefs.turnCues
+        voiceEveryKm = prefs.voiceEveryKm.coerceAtLeast(1)
+        pauseAfterMs = when (prefs.autoPauseLevel) { 0 -> 8000L; 2 -> 2500L; else -> 4000L }
         if (prefs.voice) {
             tts = TextToSpeech(applicationContext) { status ->
                 ttsReady = status == TextToSpeech.SUCCESS &&
@@ -269,7 +275,7 @@ class TrackingService : Service(), LocationListener {
         } else stillSince = 0L
         // At a known traffic signal a stop is almost certainly a real one, so pause sooner.
         val atSignal = signals.any { Geo.dist(it, pt) < 45.0 }
-        val paused = autoPauseOn && stillSince != 0L && loc.time - stillSince >= (if (atSignal) 1500 else 4000)
+        val paused = autoPauseOn && stillSince != 0L && loc.time - stillSince >= (if (atSignal) minOf(1500L, pauseAfterMs) else pauseAfterMs)
         val newStop = paused && !s.autoPaused
 
         // Following a route: how far off it are we, and how far along?
@@ -321,8 +327,8 @@ class TrackingService : Service(), LocationListener {
         val turn = nextTurn
         if (turn != null && turn !== lastCued && turn.alongM - done < 120.0 && !offRoute) {
             lastCued = turn
-            if (offRouteAlertOn) buzz(longArrayOf(0, 90, 90, 90))
-            if (ttsReady) {
+            if (turnCuesOn) buzz(longArrayOf(0, 90, 90, 90))
+            if (ttsReady && turnCuesOn) {
                 val m = (((turn.alongM - done) / 10).toInt() * 10).coerceAtLeast(10)
                 runCatching { tts?.speak("${turn.label} in $m metres", TextToSpeech.QUEUE_ADD, null, "turn") }
             }
@@ -333,7 +339,7 @@ class TrackingService : Service(), LocationListener {
         val km = (st.distanceM / 1000).toInt()
         if (km > lastSpokenKm) {
             lastSpokenKm = km
-            if (ttsReady && st.movingMs > 0) {
+            if (ttsReady && st.movingMs > 0 && km % voiceEveryKm == 0) {
                 val avg = st.distanceM / (st.movingMs / 1000.0) * 3.6
                 val text = String.format(Locale.US, "%d kilometres. Average %.0f kilometres per hour.", km, avg)
                 runCatching { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "km$km") }

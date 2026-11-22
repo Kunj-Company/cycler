@@ -137,6 +137,33 @@ class Screenshots {
         val id = vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id
         shot("16_share_video") { com.cycler.app.ui.ShareScreen(vm, id) }
     }
+    @Test fun share_cards() {
+        val id = vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id
+        shot("16b_share_cards") { com.cycler.app.ui.ShareScreen(vm, id, startMode = 1) }
+    }
+    @Test fun share_cards_editing() {
+        val id = vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id
+        shot("16c_share_cards_edit") { com.cycler.app.ui.ShareScreen(vm, id, startMode = 1, startEditing = true) }
+    }
+    @Test fun detail_advanced() {
+        val id = vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id
+        vm.advanced = true
+        vm.weightKg = 68
+        shot("15b_detail_advanced") { RouteDetailScreen(vm, id) }
+    }
+    @Test fun backup_round_trip() {
+        val before = vm.store.metas.value.size
+        val zip = java.io.ByteArrayOutputStream()
+        val exported = vm.store.exportAll(zip)
+        org.junit.Assert.assertEquals(before, exported)
+        val keep = vm.store.metas.value.first()
+        vm.store.delete(keep.id)
+        org.junit.Assert.assertEquals(before - 1, vm.store.metas.value.size)
+        val restored = vm.store.importAll(java.io.ByteArrayInputStream(zip.toByteArray()))
+        org.junit.Assert.assertTrue(restored >= before * 2)
+        org.junit.Assert.assertEquals(before, vm.store.metas.value.size)
+        org.junit.Assert.assertNotNull(vm.store.load(keep.id))
+    }
     @Test fun heatmap() = shot("17_all_rides") { com.cycler.app.ui.HeatmapScreen(vm) }
     @Test fun ride_recording_dark() { recording(); shell("05_ride_recording_dark", Tab.RIDE, dark = true) }
     @Test fun plan_empty() = shell("06_plan_empty", Tab.PLAN)
