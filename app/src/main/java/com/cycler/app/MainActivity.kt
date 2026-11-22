@@ -79,6 +79,7 @@ import com.cycler.app.ui.CyclerTheme
 import com.cycler.app.ui.Hairline
 import com.cycler.app.ui.HeatmapScreen
 import com.cycler.app.ui.ShareScreen
+import com.cycler.app.ui.OfflineScreen
 import com.cycler.app.ui.PlanScreen
 import com.cycler.app.ui.RideScreen
 import com.cycler.app.ui.RideScreenEditor
@@ -524,6 +525,11 @@ fun App(vm: MainVm) {
     if (vm.showSegments) {
         BackHandler { vm.showSegments = false }
         SegmentsScreen(vm)
+        return
+    }
+    if (vm.showOffline) {
+        BackHandler { vm.showOffline = false }
+        OfflineScreen(vm, myLoc)
         return
     }
     if (vm.showFieldEditor) {

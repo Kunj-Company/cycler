@@ -300,6 +300,8 @@ fun SettingsScreen(vm: MainVm) {
                     CheckRow(label, vm.mapStyle == key) { vm.mapStyle = key; vm.prefs.mapStyle = key }
                 }
 
+                LinkRow("Offline maps", "Save the map for an area so it shows without mobile data.") { vm.showOffline = true }
+
                 Group("Bike", "Decides which roads and tracks route planning prefers.")
                 BRouter.profiles.forEach { (key, label) ->
                     CheckRow(label, vm.profile == key) { vm.profile = key; vm.prefs.profile = key }
