@@ -82,6 +82,9 @@ import com.cycler.app.ui.ShareScreen
 import com.cycler.app.ui.PlanScreen
 import com.cycler.app.ui.RideScreen
 import com.cycler.app.ui.RideScreenEditor
+import com.cycler.app.ui.SegmentCreateScreen
+import com.cycler.app.ui.SegmentDetailScreen
+import com.cycler.app.ui.SegmentsScreen
 import com.cycler.app.ui.RouteDetailScreen
 import com.cycler.app.ui.EditRideScreen
 import com.cycler.app.ui.RidesScreen
@@ -504,6 +507,23 @@ fun App(vm: MainVm) {
     if (share != null) {
         BackHandler { vm.shareId = null }
         ShareScreen(vm, share)
+        return
+    }
+    val cut = vm.segmentFromRide
+    if (cut != null) {
+        BackHandler { vm.segmentFromRide = null }
+        SegmentCreateScreen(vm, cut)
+        return
+    }
+    val seg = vm.segmentId
+    if (seg != null) {
+        BackHandler { vm.segmentId = null }
+        SegmentDetailScreen(vm, seg)
+        return
+    }
+    if (vm.showSegments) {
+        BackHandler { vm.showSegments = false }
+        SegmentsScreen(vm)
         return
     }
     if (vm.showFieldEditor) {

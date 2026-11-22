@@ -346,6 +346,32 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                             }
                         }
 
+                        if (recorded) {
+                            // Segments this ride passed over, and a way to make a new one from it.
+                            val mine = rememberSegments(vm).mapNotNull { sf ->
+                                sf.efforts.filter { it.rideId == id }.minByOrNull { it.seconds }?.let { e -> Triple(sf, e, sf.efforts.minOf { it.seconds }) }
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                SectionLabel("Segments", Modifier.weight(1f))
+                                Text(
+                                    "Create a segment", style = MaterialTheme.typography.labelLarge, color = Cy.colors.accent,
+                                    modifier = Modifier.clip(Radius).clickable { vm.segmentFromRide = id }.padding(vertical = 6.dp, horizontal = 4.dp),
+                                )
+                            }
+                            mine.forEach { (sf, e, best) ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable { vm.detailId = null; vm.showSegments = true; vm.segmentId = sf.seg.id }.padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(sf.seg.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                    if (e.seconds == best && sf.efforts.size > 1) { Tag("Best", Cy.colors.accent, filled = true); Spacer(Modifier.width(8.dp)) }
+                                    Text(Fmt.clock(e.seconds * 1000), style = MaterialTheme.typography.titleSmall.tabular)
+                                }
+                                Hairline()
+                            }
+                        }
+
                         // The full set of numbers, behind a switch so the page stays calm by default.
                         Spacer(Modifier.height(10.dp))
                         Row(

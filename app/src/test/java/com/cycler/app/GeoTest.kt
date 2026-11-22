@@ -189,4 +189,30 @@ class GeoTest {
         java.io.File(dir, "ride.tcx").writeText(com.cycler.app.data.Tcx.write(route, hr))
         assertTrue(java.io.File(dir, "ride.fit").length() > 2000)
     }
+
+    @Test fun segment_matching_finds_each_pass_and_ignores_other_roads() {
+        // The segment: 1 km north, starting 2 km up the road.
+        val road = north(60)
+        val seg = road.subList(20, 31)
+        val segLen = Geo.length(seg)
+        // A ride up the road and back down: one pass in the segment's direction.
+        val out = road.mapIndexed { i, p -> p.copy(t = 1_000_000L + i * 10_000L) }
+        val back = road.reversed().drop(1).mapIndexed { i, p -> p.copy(t = out.last().t + (i + 1) * 10_000L) }
+        val ride = out + back
+        val passes = Geo.matchSegment(ride, Geo.cumulative(ride), seg, segLen)
+        assertEquals(1, passes.size)
+        val (a, b) = passes[0]
+        assertEquals(100.0, (ride[b].t - ride[a].t) / 1000.0, 11.0)   // 1 km at 100 m per 10 s
+        // Two laps of the road give two passes.
+        val twice = out + back + out.map { it.copy(t = it.t + 2_000_000L) }
+        assertEquals(2, Geo.matchSegment(twice, Geo.cumulative(twice), seg, segLen).size)
+        // A parallel road 200 m to the east is not a match.
+        val other = road.map { Geo.destination(it.lat, it.lon, 90.0, 200.0).copy(t = 5L) }
+        assertEquals(0, Geo.matchSegment(other, Geo.cumulative(other), seg, segLen).size)
+        // Nor is a ride that touches both ends but takes a 3 km detour between them.
+        val detour = road.subList(0, 21) +
+            (1..15).map { Geo.destination(road[20].lat, road[20].lon, 90.0, it * 100.0) } +
+            (15 downTo 0).map { Geo.destination(road[30].lat, road[30].lon, 90.0, it * 100.0) } + road.subList(31, 61)
+        assertEquals(0, Geo.matchSegment(detour, Geo.cumulative(detour), seg, segLen).size)
+    }
 }

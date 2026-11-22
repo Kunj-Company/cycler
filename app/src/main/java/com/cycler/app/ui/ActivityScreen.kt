@@ -180,7 +180,10 @@ fun ActivityScreen(vm: MainVm) {
             }
 
             Spacer(Modifier.height(20.dp))
-            CyButton("See all rides on one map", { vm.showHeatmap = true }, Modifier.fillMaxWidth(), Btn.SECONDARY)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CyButton("Segments", { vm.showSegments = true }, Modifier.weight(1f), Btn.SECONDARY)
+                CyButton("All rides map", { vm.showHeatmap = true }, Modifier.weight(1f), Btn.SECONDARY)
+            }
         }
 
         // Bike care: kilometres ridden since each job was last done.
