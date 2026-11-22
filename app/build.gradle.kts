@@ -47,6 +47,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     // Maps: MapLibre + free OpenStreetMap-based tiles (no API key)
     implementation("org.maplibre.gl:android-sdk:13.6.1")
+    // Health Connect: heart rate and weight written by Samsung Health and other apps
+    implementation("androidx.health.connect:connect-client:1.1.0")
 
     // Screenshot tests: render every screen to app/build/shots without a phone.
     // Run with: ./gradlew testDebugUnitTest

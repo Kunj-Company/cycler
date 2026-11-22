@@ -230,6 +230,21 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
     val route by produceState<Route?>(null, id) { value = withContext(Dispatchers.IO) { vm.store.load(id) } }
     var rename by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    // Heart rate: if Health Connect is connected and this ride has none yet, look for samples
+    // recorded during it (a watch syncing through Samsung Health, for example).
+    val hr by produceState(emptyList<Pair<Long, Int>>(), route, meta?.avgHr) {
+        val r = route
+        if (r == null || inspection || meta?.type != RouteType.RECORDED) return@produceState
+        value = withContext(Dispatchers.IO) { vm.store.heartRate(id) }
+        val first = r.pts.firstOrNull()?.t ?: 0L
+        if (value.isEmpty() && first > 0 && com.cycler.app.health.Health.connected(ctx)) {
+            val found = com.cycler.app.health.Health.heartRate(ctx, first, r.pts.last().t)
+            if (found.size >= 5) {
+                withContext(Dispatchers.IO) { vm.store.saveHeartRate(id, found) }
+                value = found
+            }
+        }
+    }
     // Traffic signals along the route, looked up once; null while loading or if the lookup fails.
     val signals by produceState<List<Pt>?>(null, route) {
         val r = route
@@ -322,6 +337,19 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                             }
                             if (recorded && meta.stops > 0) Metric("Stops", "${meta.stops}")
                             Metric("Signals", signals?.size?.toString() ?: "…")
+                        }
+                        if (meta.avgHr > 0) {
+                            Spacer(Modifier.height(12.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(26.dp)) {
+                                Metric("Avg heart rate", "${meta.avgHr}", unit = "bpm")
+                                Metric("Max heart rate", "${meta.maxHr}", unit = "bpm")
+                            }
+                            if (hr.size >= 10) {
+                                Spacer(Modifier.height(10.dp))
+                                // Heart rate through the ride, averaged into about forty bars.
+                                val step = (hr.size / 40).coerceAtLeast(1)
+                                MiniBars(hr.chunked(step).map { c -> c.map { it.second }.average() })
+                            }
                         }
 
                         if (meta.laps.isNotEmpty()) {

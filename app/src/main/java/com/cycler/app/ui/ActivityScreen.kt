@@ -33,7 +33,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -280,6 +282,20 @@ fun SettingsScreen(vm: MainVm) {
             toast(if (n != null && n > 0) "Restored $n files from the backup" else "That file isn't a Cycler backup")
         }
     }
+    val inspection = androidx.compose.ui.platform.LocalInspectionMode.current
+    val healthAvailable = remember { !inspection && com.cycler.app.health.Health.available(ctx) }
+    var healthOn by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (healthAvailable) healthOn = com.cycler.app.health.Health.connected(ctx) }
+    val askHealth = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.health.connect.client.PermissionController.createRequestPermissionResultContract(),
+    ) { granted ->
+        healthOn = granted.containsAll(com.cycler.app.health.Health.permissions)
+        if (healthOn) scope.launch {
+            // Fill in weight for the energy estimate if the rider hasn't set one.
+            if (vm.weightKg == 0) com.cycler.app.health.Health.latestWeightKg(ctx)?.let { vm.weightKg = it; vm.prefs.weightKg = it }
+            toast("Health Connect is connected")
+        } else toast("Heart rate and weight access wasn't granted")
+    }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())) {
             Row(Modifier.padding(start = 6.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -363,6 +379,30 @@ fun SettingsScreen(vm: MainVm) {
                     { val w = if (vm.weightKg == 0) 70 else (vm.weightKg + 1).coerceIn(30, 200); vm.weightKg = w; vm.prefs.weightKg = w })
                 ToggleRow("Advanced stats", "Open ride pages with the detailed numbers showing.", vm.advanced) {
                     vm.advanced = it; vm.prefs.advancedStats = it
+                }
+
+                Group("Health Connect", "Reads heart rate and weight that Samsung Health or another app has put in Health Connect. Nothing is written back.")
+                when {
+                    !healthAvailable -> Text(
+                        "Health Connect isn't available on this phone, or needs updating from the Play Store.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                    healthOn -> {
+                        Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            StatusDot(Cy.colors.success)
+                            Spacer(Modifier.width(10.dp))
+                            Text("Connected. Ride pages show heart rate when there is some for that ride.", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Hairline()
+                    }
+                    else -> {
+                        CyButton("Connect Health Connect", { askHealth.launch(com.cycler.app.health.Health.permissions) }, Modifier.fillMaxWidth().padding(vertical = 8.dp), Btn.SECONDARY)
+                        Text(
+                            "In Samsung Health, also turn on syncing: Settings → Health Connect → allow Heart rate and Weight.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
 
                 Group("Your data", "Everything lives on this phone only. Keep a backup somewhere else.")
