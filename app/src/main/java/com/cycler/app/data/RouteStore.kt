@@ -459,18 +459,10 @@ class Prefs(ctx: Context) {
     var customWorkout: String
         get() = sp.getString("customWorkout", "10,4,180,120,10")!!
         set(v) = sp.edit().putString("customWorkout", v).apply()
-    /** Bike parts being tracked for wear: name, service interval in km, and when last reset. */
+    /** Bike jobs being tracked: interval, when last done and a short history. Reads the old "name|km|at;" format too. */
     var care: List<CareItem>
-        get() {
-            val raw = sp.getString("care", null) ?: return CareItem.defaults()
-            return raw.split(';').mapNotNull { row ->
-                val p = row.split('|')
-                val km = p.getOrNull(1)?.toIntOrNull()
-                val at = p.getOrNull(2)?.toLongOrNull()
-                if (p[0].isBlank() || km == null || at == null) null else CareItem(p[0], km, at)
-            }
-        }
-        set(v) = sp.edit().putString("care", v.joinToString(";") { "${it.name}|${it.everyKm}|${it.resetAt}" }).apply()
+        get() = CareItem.parse(sp.getString("care", null))
+        set(v) = sp.edit().putString("care", CareItem.encode(v)).apply()
     var lastLoc: Pt?
         get() = if (sp.contains("lastLat")) Pt(sp.getFloat("lastLat", 0f).toDouble(), sp.getFloat("lastLon", 0f).toDouble()) else null
         set(v) {
@@ -478,12 +470,86 @@ class Prefs(ctx: Context) {
         }
 }
 
-/** A part of the bike that needs attention every [everyKm] kilometres. */
-data class CareItem(val name: String, val everyKm: Int, val resetAt: Long) {
+/** One time a job was done, with an optional note. */
+data class CareDone(val at: Long, val note: String = "")
+
+/**
+ * A bike job that comes round every [everyKm] kilometres (0 for none) and/or every [everyDays]
+ * days (0 for none). [resetAt] is when it was last done; 0 means never, so every ride counts.
+ * [resetAt] always equals the newest entry in [history] when there is one.
+ */
+data class CareItem(
+    val name: String,
+    val everyKm: Int,
+    val resetAt: Long,
+    val everyDays: Int = 0,
+    val note: String = "",
+    val history: List<CareDone> = emptyList(),
+    val id: String = java.util.UUID.randomUUID().toString(),
+) {
+    /** Record the job as done at [at]; only the newest [MAX_HISTORY] entries are kept. */
+    fun markDone(at: Long, note: String = ""): CareItem {
+        val h = (history + CareDone(at, note.trim())).sortedByDescending { it.at }.take(MAX_HISTORY)
+        return copy(history = h, resetAt = h.first().at)
+    }
+
+    /** Forget one history entry; the last-done date falls back to the next newest one. */
+    fun removeDone(entry: CareDone): CareItem {
+        val h = history - entry
+        return copy(history = h, resetAt = h.maxOfOrNull { it.at } ?: 0L)
+    }
+
     companion object {
+        const val MAX_HISTORY = 20
+
         fun defaults() = listOf(
             CareItem("Lube the chain", 300, 0), CareItem("Check tyres and brake pads", 1000, 0),
             CareItem("Full service", 2500, 0), CareItem("Replace chain", 4000, 0),
         )
+
+        /** Reads either the JSON written by this version or the old `name|everyKm|resetAt` rows joined by `;`. */
+        fun parse(raw: String?): List<CareItem> {
+            if (raw == null) return defaults()
+            if (raw.trimStart().startsWith("[")) {
+                runCatching {
+                    val arr = org.json.JSONArray(raw)
+                    return (0 until arr.length()).mapNotNull { i ->
+                        val o = arr.getJSONObject(i)
+                        val name = o.optString("name")
+                        if (name.isBlank()) return@mapNotNull null
+                        val hist = o.optJSONArray("history")
+                        val history = if (hist == null) emptyList() else (0 until hist.length()).map {
+                            val h = hist.getJSONObject(it)
+                            CareDone(h.optLong("at"), h.optString("note"))
+                        }
+                        CareItem(
+                            name, o.optInt("everyKm"), o.optLong("resetAt"), o.optInt("everyDays"), o.optString("note"),
+                            history, o.optString("id").ifBlank { java.util.UUID.randomUUID().toString() },
+                        )
+                    }
+                }
+            }
+            return raw.split(';').mapNotNull { row ->
+                val p = row.split('|')
+                val km = p.getOrNull(1)?.toIntOrNull()
+                val at = p.getOrNull(2)?.toLongOrNull()
+                if (p[0].isBlank() || km == null || at == null) null
+                else CareItem(p[0], km, at, history = if (at > 0) listOf(CareDone(at)) else emptyList())
+            }
+        }
+
+        fun encode(items: List<CareItem>): String {
+            val arr = org.json.JSONArray()
+            items.forEach { c ->
+                arr.put(org.json.JSONObject().apply {
+                    put("id", c.id); put("name", c.name); put("everyKm", c.everyKm); put("everyDays", c.everyDays)
+                    put("resetAt", c.resetAt); put("note", c.note)
+                    put("history", org.json.JSONArray().apply {
+                        c.history.forEach { h -> put(org.json.JSONObject().put("at", h.at).put("note", h.note)) }
+                    })
+                })
+            }
+            return arr.toString()
+        }
     }
 }

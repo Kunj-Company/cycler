@@ -74,6 +74,7 @@ import com.cycler.app.track.TrackStatus
 import com.cycler.app.track.TrackingService
 import com.cycler.app.track.locationFlow
 import com.cycler.app.ui.ActivityScreen
+import com.cycler.app.ui.BikeCareScreen
 import com.cycler.app.ui.Cy
 import com.cycler.app.ui.CyclerTheme
 import com.cycler.app.ui.Hairline
@@ -199,6 +200,9 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     var care by mutableStateOf(prefs.care)
     /** False until the first-launch setup is done; riders who already have rides never see it. */
     var onboarded by mutableStateOf(prefs.onboarded || store.metas.value.isNotEmpty())
+    var showCare by mutableStateOf(false)
+    /** Period, sort, search and tag chosen on the Rides tab; kept while the app is open. */
+    var rideFilter by mutableStateOf(com.cycler.app.data.RideFilter())
 
     fun saveCare(items: List<CareItem>) {
         care = items
@@ -548,6 +552,11 @@ fun App(vm: MainVm) {
     if (vm.showSegments) {
         BackHandler { vm.showSegments = false }
         SegmentsScreen(vm)
+        return
+    }
+    if (vm.showCare) {
+        BackHandler { vm.showCare = false }
+        BikeCareScreen(vm)
         return
     }
     if (vm.showOffline) {
