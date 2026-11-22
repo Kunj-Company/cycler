@@ -25,9 +25,12 @@ Or install the prebuilt debug build directly:
 - **Plan → A to B**: Start and End fields, optional stops, search or long-press the map.
   Up to three routes with distance, climb, time, difficulty and an elevation profile.
 - **Plan → Loop**: pick a distance (5–200 km), get round trips in four directions.
-- **Plan → My rides**: saved routes nearest first; ride one again or save it reversed.
-- **Routes**: "Suggest routes near me" (short, medium, long loops), plus everything saved,
-  with outline, stats, difficulty, rename, delete, GPX import/export.
+- **Plan → Saved**: "Suggest routes near me" (short, medium, long loops) and your saved
+  routes, with GPX import.
+- **Rides**: a feed of your finished rides, newest first, with stats, route shape,
+  photos, how it felt, notes and tags.
+- **After a ride**: a save page for the title, how it felt, notes, tags, photos and videos.
+  The same page edits a ride later.
 - **Activity**: this week against your goal, last 8 weeks, month and all-time totals, records.
 - **Ride page**: attach photos and videos, see stops, stopped time and signal count.
 - **Share**: an animated 3D flyover video of the ride (slow start, fast middle, slow end,

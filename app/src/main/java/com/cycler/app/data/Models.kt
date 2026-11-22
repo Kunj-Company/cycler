@@ -34,8 +34,21 @@ data class RouteMeta(
     val bests: Map<Int, Long> = emptyMap(),
     /** Storage format version, used to fill in fields added by later app versions. */
     val v: Int = 0,
+    /** What the rider wrote about the ride. */
+    val notes: String = "",
+    /** How the ride felt, 1 (rough) to 5 (great); 0 when not set. */
+    val feeling: Int = 0,
+    val tags: List<String> = emptyList(),
 ) {
     val difficulty: Difficulty get() = Difficulty.of(distanceM, ascentM)
+}
+
+/** The five answers to "How did it feel?", worst to best. */
+object Feeling {
+    val all = listOf("😫" to "Rough", "😕" to "Tough", "🙂" to "Okay", "😄" to "Good", "🤩" to "Great")
+    fun emoji(level: Int) = all.getOrNull(level - 1)?.first
+    fun label(level: Int) = all.getOrNull(level - 1)?.second
+    val suggestedTags = listOf("Commute", "Workout", "Long ride", "Leisure", "Hills", "Group ride", "Solo", "Recovery")
 }
 
 /** A rough effort label: every 40 m of climbing counts like one extra kilometre. */

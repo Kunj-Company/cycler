@@ -102,6 +102,18 @@ class RouteStore private constructor(ctx: Context) {
         reload()
     }
 
+    /** Save what the rider filled in after the ride. */
+    @Synchronized
+    fun updateDetails(id: String, name: String, notes: String, feeling: Int, tags: List<String>) {
+        val meta = _metas.value.firstOrNull { it.id == id } ?: return
+        val updated = meta.copy(
+            name = name.ifBlank { meta.name }, notes = notes.trim(), feeling = feeling.coerceIn(0, 5),
+            tags = tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
+        )
+        writeSafely(File(dir, "$id.meta.json"), metaToJson(updated).toString())
+        reload()
+    }
+
     @Synchronized
     fun delete(id: String) {
         File(dir, "$id.meta.json").delete()
@@ -180,6 +192,7 @@ class RouteStore private constructor(ctx: Context) {
         .put("maxSpeedMs", m.maxSpeedMs).put("elapsedS", m.elapsedS)
         .put("thumb", JSONArray().also { arr -> m.thumb.forEach { arr.put(JSONArray().put(it.lat).put(it.lon)) } })
         .put("stops", m.stops).put("v", m.v)
+        .put("notes", m.notes).put("feeling", m.feeling).put("tags", JSONArray(m.tags))
         .put("bests", JSONObject().also { o -> m.bests.forEach { (k, s) -> o.put(k.toString(), s) } })
 
     private fun metaFromJson(o: JSONObject) = RouteMeta(
@@ -197,6 +210,8 @@ class RouteStore private constructor(ctx: Context) {
             o.optJSONObject("bests")?.let { b -> b.keys().asSequence().associate { it.toInt() to b.getLong(it) } }
         }.getOrNull() ?: emptyMap(),
         o.optInt("v", 0),
+        o.optString("notes", ""), o.optInt("feeling", 0),
+        o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } } ?: emptyList(),
     )
 
     companion object {

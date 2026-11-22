@@ -100,6 +100,19 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
     val startPt = vm.start?.pt ?: myLoc
     val abPoints = listOfNotNull(startPt) + vm.vias.map { it.pt } + listOfNotNull(vm.end?.pt)
 
+    if (mode == PlanMode.SAVED) {
+        // Saved and suggested routes: a plain list, no map.
+        Column(Modifier.fillMaxSize()) {
+            Segmented(
+                PlanMode.entries.map { it.label }, PlanMode.entries.indexOf(mode),
+                { i -> vm.clearPlan(); vm.planMode = PlanMode.entries[i] },
+                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
+            )
+            RoutesScreen(vm, myLoc)
+        }
+        return
+    }
+
     LaunchedEffect(myLoc) {
         if (!centred && myLoc != null && vm.options.isEmpty() && vm.end == null && vm.start == null) {
             camera = CameraCmd(listOf(myLoc), 13.5)
@@ -111,7 +124,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
     }
 
     fun setPoint(p: Pt, label: String) {
-        if (mode == PlanMode.PAST) return
+        if (mode == PlanMode.SAVED) return
         val stop = Stop(p, label)
         when (pick) {
             Pick.START -> { vm.start = stop; if (mode == PlanMode.AB && vm.end == null) vm.pick = Pick.END }
@@ -142,7 +155,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
 
     val lines = remember(vm.options, vm.selected, pastRoute, mode) {
         buildList {
-            if (mode == PlanMode.PAST) {
+            if (mode == PlanMode.SAVED) {
                 pastRoute?.let { add(MapLine(it.pts, COLOR_GUIDE, 5f)) }
             } else {
                 vm.options.forEachIndexed { i, o -> if (i != vm.selected) add(MapLine(o.pts, COLOR_ALT, 4f)) }
@@ -153,7 +166,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
     val dots = remember(myLoc, vm.start, vm.end, vm.vias, mode) {
         buildList {
             myLoc?.let { add(MapDot(it, COLOR_ME, 7f)) }
-            if (mode != PlanMode.PAST) {
+            if (mode != PlanMode.SAVED) {
                 vm.start?.let { add(MapDot(it.pt, GREEN, 9f)) }
                 if (mode == PlanMode.AB) {
                     vm.vias.forEach { add(MapDot(it.pt, ORANGE, 7f)) }
@@ -168,7 +181,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
             CyclerMap(
                 Modifier.fillMaxSize(), vm.mapStyle, lines, dots, camera,
                 initial = vm.prefs.lastLoc,
-                onLongPress = if (mode == PlanMode.PAST) null else { p -> setPoint(p, "Pin on map") },
+                onLongPress = if (mode == PlanMode.SAVED) null else { p -> setPoint(p, "Pin on map") },
             )
             LayerButton(vm.mapStyle, Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
                 vm.mapStyle = it; vm.prefs.mapStyle = it
@@ -187,7 +200,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                             },
                             Modifier.fillMaxWidth().padding(6.dp),
                         )
-                        if (mode != PlanMode.PAST) {
+                        if (mode != PlanMode.SAVED) {
                             TextField(
                                 value = query,
                                 onValueChange = { query = it; if (it.isBlank()) { places = emptyList(); searchNote = null } },
@@ -241,7 +254,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                     .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
                 val hint = "Long-press the map or search above"
-                val showResults = vm.options.isNotEmpty() && mode != PlanMode.PAST
+                val showResults = vm.options.isNotEmpty() && mode != PlanMode.SAVED
                 val startText = vm.start?.label ?: if (myLoc != null) "My location" else "My location (waiting for GPS…)"
                 when (mode) {
                     PlanMode.AB -> if (showResults) {
@@ -342,7 +355,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                             enabled = startPt != null && !vm.busy,
                         )
                     }
-                    PlanMode.PAST -> PastRides(vm, metas.sortedBy { m ->
+                    PlanMode.SAVED -> PastRides(vm, metas.sortedBy { m ->
                         if (myLoc == null) 0.0 else Geo.dist(myLoc.lat, myLoc.lon, m.startLat, m.startLon)
                     }, myLoc, pastRoute) { r ->
                         pastRoute = r
@@ -350,7 +363,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                     }
                 }
 
-                if (mode != PlanMode.PAST) {
+                if (mode != PlanMode.SAVED) {
                     if (vm.busy) {
                         Spacer(Modifier.height(10.dp))
                         LinearProgressIndicator(Modifier.fillMaxWidth(), color = Cy.colors.accent, trackColor = Cy.colors.subtle)

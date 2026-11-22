@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import com.cycler.app.MainVm
 import com.cycler.app.Tab
 import com.cycler.app.data.Difficulty
+import com.cycler.app.data.Feeling
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Gpx
 import com.cycler.app.data.Pt
@@ -114,7 +115,6 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val metas by vm.store.metas.collectAsState()
-    var filter by remember { mutableIntStateOf(0) }
 
     val importGpx = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -141,24 +141,13 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
         }
     }
 
-    val shown = metas.filter {
-        when (filter) {
-            1 -> it.type == RouteType.RECORDED
-            2 -> it.type == RouteType.PLANNED
-            else -> true
-        }
-    }
+    // Finished rides live in the Rides tab; this list is for routes to ride.
+    val shown = metas.filter { it.type == RouteType.PLANNED }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
         item(key = "head") {
             Column {
-                Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Routes", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
-                    TextButton({ importGpx.launch(arrayOf("*/*")) }) {
-                        Text("Import GPX", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
                 CyButton(
                     when {
                         myLoc == null -> "Waiting for your location…"
@@ -203,21 +192,20 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
         }
         item(key = "saved-head") {
             Column {
-                SectionLabel("Saved", Modifier.padding(top = 22.dp, bottom = 10.dp))
-                Segmented(listOf("All", "Rides", "Planned"), filter, { filter = it }, Modifier.fillMaxWidth())
+                Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel("Saved routes", Modifier.weight(1f))
+                    TextButton({ importGpx.launch(arrayOf("*/*")) }) {
+                        Text("Import GPX", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 if (shown.isEmpty()) {
                     Text(
-                        when (filter) {
-                            1 -> "No rides recorded yet. Press Start on the Ride tab and your ride lands here."
-                            2 -> "No planned routes yet. Build one in the Plan tab, or save a suggestion."
-                            else -> "Nothing saved yet. Recorded rides and planned routes will appear here."
-                        },
+                        "No saved routes yet. Build one with A to B or Loop, or save a suggestion.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 20.dp),
+                        modifier = Modifier.padding(top = 8.dp),
                     )
                 }
-                Spacer(Modifier.height(4.dp))
             }
         }
         items(shown, key = { it.id }) { m ->
@@ -241,17 +229,6 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
     val route by produceState<Route?>(null, id) { value = withContext(Dispatchers.IO) { vm.store.load(id) } }
     var rename by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    var removeMedia by remember { mutableStateOf<java.io.File?>(null) }
-    val mediaTick by vm.store.mediaTick.collectAsState()
-    val media = remember(id, mediaTick) { vm.store.media(id) }
-    val thumbs by produceState(emptyList<Pair<java.io.File, android.graphics.Bitmap>>(), media) {
-        value = withContext(Dispatchers.IO) { media.mapNotNull { f -> loadShareImage(f, 200)?.let { f to it } } }
-    }
-    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(8)) { uris ->
-        if (uris.isNotEmpty()) scope.launch {
-            withContext(Dispatchers.IO) { uris.forEach { vm.store.addMedia(id, ctx.contentResolver, it) } }
-        }
-    }
     // Traffic signals along the route, looked up once; null while loading or if the lookup fails.
     val signals by produceState<List<Pt>?>(null, route) {
         val r = route
@@ -283,7 +260,9 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                 IconButton({
                     meta?.let { export.launch(it.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "route" } + ".gpx") }
                 }) { Icon(Icons.Outlined.FileDownload, "Export GPX", Modifier.size(22.dp)) }
-                IconButton({ rename = true }) { Icon(Icons.Outlined.Edit, "Rename", Modifier.size(20.dp)) }
+                IconButton({
+                    if (meta?.type == RouteType.RECORDED) { vm.editIsNew = false; vm.editId = id } else rename = true
+                }) { Icon(Icons.Outlined.Edit, "Edit", Modifier.size(20.dp)) }
                 IconButton({ confirmDelete = true }) { Icon(Icons.Outlined.DeleteOutline, "Delete", Modifier.size(22.dp)) }
             }
             val r = route
@@ -310,6 +289,7 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Tag(if (recorded) "Ride" else "Planned")
                             DifficultyTag(meta.difficulty)
+                            Feeling.emoji(meta.feeling)?.let { Text("$it ${Feeling.label(meta.feeling)}", style = MaterialTheme.typography.labelMedium) }
                             Text(
                                 Fmt.date(meta.createdAt), style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -334,38 +314,19 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                             Metric("Signals", signals?.size?.toString() ?: "…")
                         }
 
-                        // Photos and videos from the ride.
-                        Spacer(Modifier.height(16.dp))
-                        Row(
-                            Modifier.horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            thumbs.forEach { (file, bmp) ->
-                                Box(Modifier.size(68.dp).clip(Radius).clickable { removeMedia = file }) {
-                                    Image(
-                                        bmp.asImageBitmap(), "Ride photo", contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                    if (file.name.endsWith(".mp4")) {
-                                        Icon(
-                                            Icons.Outlined.PlayArrow, "Video", tint = androidx.compose.ui.graphics.Color.White,
-                                            modifier = Modifier.align(Alignment.Center).size(28.dp),
-                                        )
-                                    }
-                                }
-                            }
-                            Row(
-                                Modifier.height(68.dp).clip(Radius).border(1.dp, Cy.colors.border, Radius)
-                                    .clickable {
-                                        pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                                    }.padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(Icons.Outlined.AddPhotoAlternate, null, Modifier.size(20.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text(if (media.isEmpty()) "Add photos or videos" else "Add", style = MaterialTheme.typography.labelLarge)
+                        // What the rider wrote afterwards.
+                        if (meta.notes.isNotBlank() || meta.tags.isNotEmpty()) {
+                            Spacer(Modifier.height(14.dp))
+                            if (meta.notes.isNotBlank()) Text(meta.notes, style = MaterialTheme.typography.bodyMedium)
+                            if (meta.tags.isNotEmpty()) {
+                                Row(
+                                    Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) { meta.tags.forEach { Tag(it) } }
                             }
                         }
+                        Spacer(Modifier.height(16.dp))
+                        MediaStrip(vm, id)
                         if (r != null) {
                             Spacer(Modifier.height(16.dp))
                             ElevationChart(r.pts)
@@ -407,20 +368,6 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
         }
     }
 
-    removeMedia?.let { f ->
-        AlertDialog(
-            onDismissRequest = { removeMedia = null },
-            shape = RadiusLarge,
-            title = { Text("Remove from this ride?", style = MaterialTheme.typography.titleLarge) },
-            text = { Text("The copy kept with this ride is removed. Your gallery is not touched.") },
-            confirmButton = {
-                TextButton({ vm.store.removeMedia(f); removeMedia = null }) { Text("Remove", color = Cy.colors.danger) }
-            },
-            dismissButton = {
-                TextButton({ removeMedia = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            },
-        )
-    }
     if (rename && meta != null) {
         NameDialog("Rename", meta.name, "Save", { rename = false; vm.store.rename(id, it) }, { rename = false })
     }

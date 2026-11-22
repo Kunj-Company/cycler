@@ -73,6 +73,12 @@ class Screenshots {
                 createdAt = now - ago * day, maxSpeedMs = 11.8, elapsedS = (km / 18.0 * 3600).toLong(),
             )
         }
+        vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.let {
+            vm.store.updateDetails(it.id, "Nandi foothills at sunrise", "Left at 5:30 to beat the traffic. Legs felt great on the climb, and the descent was the best part. Tea stop at the top.", 5, listOf("Long ride", "Hills", "Group ride"))
+        }
+        vm.store.metas.value.first { it.name == "Evening ride" }.let {
+            vm.store.updateDetails(it.id, "Evening ride", "Headwind the whole way back.", 2, listOf("Commute"))
+        }
         vm.store.save("To Lalbagh Botanical Garden", RouteType.PLANNED, loop(9.0, 11), 1800, 9000.0, 48.0)
         vm.weather = Weather.Now(27.4, 12.3, 25.0, 49.0, 30, 2, System.currentTimeMillis() + 70 * 60_000)
         TrackingService.state.value = TrackState()
@@ -115,12 +121,12 @@ class Screenshots {
     @Test fun ride_no_permission() = shell("02_ride_no_permission", Tab.RIDE, granted = false)
     @Test fun ride_recording() { recording(); shell("03_ride_recording", Tab.RIDE) }
     @Test fun ride_following_off_route() {
-        vm.follow(vm.store.load(vm.store.metas.value.first { it.name == "Nandi foothills" }.id))
+        vm.follow(vm.store.load(vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id))
         recording(offRoute = true)
         shell("04_ride_off_route", Tab.RIDE)
     }
     @Test fun ride_following_turn() {
-        vm.follow(vm.store.load(vm.store.metas.value.first { it.name == "Nandi foothills" }.id))
+        vm.follow(vm.store.load(vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id))
         recording()
         TrackingService.state.value = TrackingService.state.value.copy(
             nextTurn = "Turn left", nextTurnLeft = true, nextTurnM = 180.0, guideTotalM = 62_300.0, stops = 3,
@@ -128,7 +134,7 @@ class Screenshots {
         shell("04b_ride_turn_cue", Tab.RIDE)
     }
     @Test fun share_video() {
-        val id = vm.store.metas.value.first { it.name == "Nandi foothills" }.id
+        val id = vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id
         shot("16_share_video") { com.cycler.app.ui.ShareScreen(vm, id) }
     }
     @Test fun heatmap() = shot("17_all_rides") { com.cycler.app.ui.HeatmapScreen(vm) }
@@ -146,17 +152,23 @@ class Screenshots {
         vm.options = options().mapIndexed { i, o -> RouteOption(listOf("North loop", "East loop", "South loop")[i], o.pts, o.distanceM, o.ascentM, o.timeS, o.tags) }
         shell("08b_plan_loop_results", Tab.PLAN, dark = true)
     }
-    @Test fun plan_past() { vm.planMode = PlanMode.PAST; shell("09_plan_past", Tab.PLAN) }
     @Test fun routes() {
         vm.suggestions = options().mapIndexed { i, o -> RouteOption(listOf("Short loop · north", "Medium loop · east", "Long loop · south-west")[i], o.pts, o.distanceM * (i + 1), o.ascentM * (i + 1), o.timeS * (i + 1)) }
-        shell("10_routes", Tab.ROUTES)
+        vm.planMode = PlanMode.SAVED
+        shell("10_plan_saved", Tab.PLAN)
     }
-    @Test fun routes_dark() = shell("11_routes_dark", Tab.ROUTES, dark = true)
+    @Test fun rides_feed() = shell("11_rides", Tab.RIDES)
+    @Test fun rides_feed_dark() = shell("11b_rides_dark", Tab.RIDES, dark = true)
+    @Test fun save_ride() {
+        val id = vm.store.metas.value.first { it.name == "Evening ride" }.id
+        vm.editIsNew = true
+        shot("18_save_ride") { com.cycler.app.ui.EditRideScreen(vm, id) }
+    }
     @Test fun activity() = shell("12_activity", Tab.ACTIVITY)
     @Test fun activity_dark() = shell("13_activity_dark", Tab.ACTIVITY, dark = true)
     @Test fun settings() = shot("14_settings") { SettingsScreen(vm) }
     @Test fun detail() {
-        val id = vm.store.metas.value.first { it.name == "Nandi foothills" }.id
+        val id = vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id
         shot("15_detail") { RouteDetailScreen(vm, id) }
     }
 }

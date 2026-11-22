@@ -32,7 +32,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.BarChart
-import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -81,7 +81,8 @@ import com.cycler.app.ui.ShareScreen
 import com.cycler.app.ui.PlanScreen
 import com.cycler.app.ui.RideScreen
 import com.cycler.app.ui.RouteDetailScreen
-import com.cycler.app.ui.RoutesScreen
+import com.cycler.app.ui.EditRideScreen
+import com.cycler.app.ui.RidesScreen
 import com.cycler.app.ui.SettingsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -104,11 +105,11 @@ class CyclerApp : Application() {
 enum class Tab(val label: String, val icon: ImageVector) {
     RIDE("Ride", Icons.AutoMirrored.Outlined.DirectionsBike),
     PLAN("Plan", Icons.Outlined.Route),
-    ROUTES("Routes", Icons.Outlined.BookmarkBorder),
+    RIDES("Rides", Icons.Outlined.ViewAgenda),
     ACTIVITY("Activity", Icons.Outlined.BarChart),
 }
 
-enum class PlanMode(val label: String) { AB("A to B"), LOOP("Loop"), PAST("My rides") }
+enum class PlanMode(val label: String) { AB("A to B"), LOOP("Loop"), SAVED("Saved") }
 
 /** A chosen place in the planner. */
 class Stop(val pt: Pt, val label: String)
@@ -167,6 +168,10 @@ class MainVm(app: Application) : AndroidViewModel(app) {
 
     /** Which full-screen page is open on top of the tabs, if any. */
     var shareId by mutableStateOf<String?>(null)
+    /** The ride whose title, notes, feeling, tags and photos are being edited. */
+    var editId by mutableStateOf<String?>(null)
+    /** True when [editId] is a ride that has just been finished. */
+    var editIsNew by mutableStateOf(false)
     var showHeatmap by mutableStateOf(false)
     var care by mutableStateOf(prefs.care)
 
@@ -484,6 +489,12 @@ fun App(vm: MainVm) {
         ShareScreen(vm, share)
         return
     }
+    val edit = vm.editId
+    if (edit != null) {
+        BackHandler { vm.editId = null; if (vm.editIsNew) { vm.editIsNew = false; vm.tab = Tab.RIDES } }
+        EditRideScreen(vm, edit)
+        return
+    }
     if (vm.showHeatmap) {
         BackHandler { vm.showHeatmap = false }
         HeatmapScreen(vm)
@@ -513,7 +524,7 @@ fun AppShell(vm: MainVm, myLoc: Pt?, granted: Boolean, request: () -> Unit) {
             when (vm.tab) {
                 Tab.RIDE -> RideScreen(vm, myLoc, granted, request)
                 Tab.PLAN -> PlanScreen(vm, myLoc)
-                Tab.ROUTES -> RoutesScreen(vm, myLoc)
+                Tab.RIDES -> RidesScreen(vm)
                 Tab.ACTIVITY -> ActivityScreen(vm)
             }
         }

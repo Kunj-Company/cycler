@@ -119,7 +119,9 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
         val id = st.savedId ?: return@LaunchedEffect
         TrackingService.state.update { it.copy(savedId = null) }
         vm.follow(null)
-        vm.detailId = id
+        // Straight to the post-ride page: title, how it felt, notes, tags, photos.
+        vm.editIsNew = true
+        vm.editId = id
     }
     val view = LocalView.current
     DisposableEffect(active, vm.keepScreenOn) {
@@ -245,27 +247,22 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
     }
 
     if (showFinish) {
-        var name by remember { mutableStateOf(Fmt.rideName()) }
         AlertDialog(
             onDismissRequest = { showFinish = false },
             shape = RadiusLarge,
-            title = { Text("Finish ride", style = MaterialTheme.typography.titleLarge) },
+            title = { Text("Finish ride?", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Column {
-                    Text(
-                        "${Fmt.km(st.distanceM)} · ${Fmt.clock(st.movingMs)} moving",
-                        style = MaterialTheme.typography.bodyMedium.tabular,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }, shape = Radius)
-                }
+                Text(
+                    "${Fmt.km(st.distanceM)} · ${Fmt.clock(st.movingMs)} moving. You can add a title, notes and photos next.",
+                    style = MaterialTheme.typography.bodyMedium.tabular,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             },
             confirmButton = {
                 TextButton({
                     showFinish = false
-                    TrackingService.send(ctx, TrackingService.ACTION_STOP, name.trim().ifBlank { "Ride" })
-                }) { Text("Save ride") }
+                    TrackingService.send(ctx, TrackingService.ACTION_STOP, Fmt.rideName())
+                }) { Text("Finish") }
             },
             dismissButton = {
                 Row {
