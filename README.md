@@ -1,16 +1,21 @@
 # Cycler
 
 A personal cycling app for Android: record rides, plan routes, get loop suggestions.
-No account, no cloud. Everything is saved on the phone.
+No account, no cloud, no tracking. Everything is saved on the phone.
+
+Open source under the [MIT licence](LICENSE). Developed by Abhiram N J.
 
 ## Run it
+
+Needs Android 8.0 or newer.
 
 1. Open this folder in Android Studio and let Gradle sync.
 2. Plug in the phone (USB debugging on) and press Run.
 
-Or install the prebuilt debug build directly:
+Or build and install from a terminal:
 
-    adb install -r Cycler-debug.apk
+    ./gradlew assembleDebug
+    adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## What it does
 
@@ -47,9 +52,11 @@ Or install the prebuilt debug build directly:
 - **Export**: FIT, TCX and GPX files, or hand a FIT file to Strava through the share sheet.
 - **Health Connect**: heart rate and weight from Samsung Health or other apps.
 - **Offline maps**: save the map around you for rides without signal.
-- **Settings**: appearance, map style, bike type, auto-pause and how quickly it kicks in,
-  turn cues, off-route alert, spoken updates and how often, weekly goal, rider weight,
-  and backup / restore of everything as one zip.
+- **First launch**: a short setup for location, background recording, bike type and
+  weekly goal.
+- **Settings**: a short list of sections (appearance, bike, recording, alerts and voice,
+  goals, Health Connect, maps and data, phone), with backup / restore of everything as
+  one zip, and an About page with what's new and licences.
 
 ## Services used (all free, no API keys)
 
@@ -91,3 +98,14 @@ The map is drawn as a sketch there; real tiles only appear on a device.
 - `track/TrackingService.kt` foreground GPS recording, auto-pause, off-route alerts
 - `ui/` theme, components, screens and the map wrapper
 - `MainActivity.kt` app shell and planning logic
+
+## Privacy
+
+Rides, photos and settings stay in the app's own storage on the phone. The app has no
+analytics and no account. It talks to the map, routing, search and weather services
+listed above, which see the places you ask them about, as any map app's servers do.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Libraries, the Inter font and map data keep their own
+licences, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
