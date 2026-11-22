@@ -317,6 +317,14 @@ fun SettingsScreen(vm: MainVm) {
                 ToggleRow("Keep screen on", "Recording continues with the screen off either way.", vm.keepScreenOn) {
                     vm.keepScreenOn = it; vm.prefs.keepScreenOn = it
                 }
+                SettingLabel("Auto-lap", "Mark a lap by itself at a set distance. The Lap button works either way.")
+                val lapSteps = listOf(0, 1, 5, 10)
+                Segmented(
+                    lapSteps.map { if (it == 0) "Off" else "$it km" }, lapSteps.indexOf(vm.autoLapKm).coerceAtLeast(0),
+                    { vm.autoLapKm = lapSteps[it]; vm.prefs.autoLapKm = lapSteps[it] }, Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                )
+                Hairline()
+                LinkRow("Ride screen", "Choose the numbers and pages on the big-number screen.") { vm.showFieldEditor = true }
 
                 Group("Following a route")
                 ToggleRow("Turn cues", "A short vibration, and a spoken cue if speech is on, before each turn.", vm.turnCues) {

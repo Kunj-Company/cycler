@@ -315,6 +315,28 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                             Metric("Signals", signals?.size?.toString() ?: "…")
                         }
 
+                        if (meta.laps.isNotEmpty()) {
+                            Spacer(Modifier.height(16.dp))
+                            SectionLabel("Laps")
+                            Spacer(Modifier.height(4.dp))
+                            var prev = com.cycler.app.data.LapMark(0.0, 0, 0)
+                            meta.laps.forEachIndexed { i, lap ->
+                                val d = lap.distanceM - prev.distanceM
+                                val t = lap.movingMs - prev.movingMs
+                                prev = lap
+                                Row(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+                                    Text("${i + 1}", style = MaterialTheme.typography.bodyMedium.tabular, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(32.dp))
+                                    Text(Fmt.km(d), style = MaterialTheme.typography.titleSmall.tabular, modifier = Modifier.weight(1f))
+                                    Text(Fmt.clock(t), style = MaterialTheme.typography.titleSmall.tabular, modifier = Modifier.weight(1f))
+                                    Text(
+                                        if (t > 0) Fmt.kmh(d / (t / 1000.0)) + " km/h" else "–",
+                                        style = MaterialTheme.typography.titleSmall.tabular,
+                                    )
+                                }
+                                Hairline()
+                            }
+                        }
+
                         // The full set of numbers, behind a switch so the page stays calm by default.
                         Spacer(Modifier.height(10.dp))
                         Row(

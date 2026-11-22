@@ -14,6 +14,7 @@ import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
@@ -27,6 +28,8 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.cycler.app.MainActivity
 import com.cycler.app.data.Geo
+import com.cycler.app.data.LapMark
+import com.cycler.app.data.Workout
 import com.cycler.app.data.Prefs
 import com.cycler.app.data.Pt
 import com.cycler.app.data.RouteStore
@@ -66,6 +69,10 @@ data class TrackState(
     val nextTurnM: Double = 0.0,
     /** Times the rider has come to a stop so far. */
     val stops: Int = 0,
+    val laps: List<LapMark> = emptyList(),
+    /** Which step of the chosen workout is running; -1 when there is no workout or it has finished. */
+    val workoutStep: Int = -1,
+    val workoutLeftS: Int = 0,
     /** Location is switched off on the phone, so nothing can be recorded. */
     val gpsOff: Boolean = false,
     /** A one-off message for the rider, e.g. why a ride could not start. */
@@ -73,6 +80,10 @@ data class TrackState(
     /** Set once a ride has been saved, so the UI can open it. */
     val savedId: String? = null,
 ) {
+    /** Distance and moving time since the last lap mark. */
+    val lapDistanceM: Double get() = distanceM - (laps.lastOrNull()?.distanceM ?: 0.0)
+    val lapMovingMs: Long get() = movingMs - (laps.lastOrNull()?.movingMs ?: 0L)
+
     fun elapsedMs(now: Long) = activeMs + if (status == TrackStatus.RECORDING) (now - resumedAt).coerceAtLeast(0) else 0
 }
 
@@ -99,7 +110,54 @@ class TrackingService : Service(), LocationListener {
     private var lastCued: Turn? = null
     private var turnCuesOn = true
     private var voiceEveryKm = 1
+    private var voiceKmOn = false
     private var pauseAfterMs = 4000L
+    private var autoLapM = 0.0
+    private val ticker = Handler(Looper.getMainLooper())
+    private var lastWorkoutStep = -2
+    /** Runs once a second while a workout is on, so blocks change on time even without a GPS fix. */
+    private val tick = object : Runnable {
+        override fun run() {
+            val s = state.value
+            val w = workout
+            if (s.status == TrackStatus.IDLE || w == null) return
+            if (s.status == TrackStatus.RECORDING) {
+                val pos = w.at(s.elapsedMs(System.currentTimeMillis()) / 1000)
+                val step = pos?.first ?: -1
+                if (step != lastWorkoutStep) {
+                    if (lastWorkoutStep != -2 || step == 0) announceStep(w, step)
+                    lastWorkoutStep = step
+                }
+                if (pos != null && pos.second == 3) buzz(longArrayOf(0, 60))
+                state.update { it.copy(workoutStep = step, workoutLeftS = pos?.second ?: 0) }
+                if (pos == null) return
+            }
+            ticker.postDelayed(this, 1000)
+        }
+    }
+
+    private fun announceStep(w: Workout, step: Int) {
+        val text = if (step < 0) "Workout complete. Nice work." else w.steps[step].let { st ->
+            val len = if (st.seconds >= 60) "${st.seconds / 60} minute${if (st.seconds >= 120) "s" else ""}" +
+                (if (st.seconds % 60 != 0) " ${st.seconds % 60}" else "") else "${st.seconds} seconds"
+            "${st.label}, $len"
+        }
+        buzz(if (step >= 0 && w.steps[step].effort >= 2) longArrayOf(0, 250, 120, 250) else longArrayOf(0, 400))
+        if (ttsReady) runCatching { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "workout") }
+    }
+
+    private fun markLap(auto: Boolean) {
+        val s = state.value
+        if (s.status == TrackStatus.IDLE || s.lapDistanceM < 20.0) return
+        val mark = LapMark(s.distanceM, s.movingMs, s.elapsedMs(System.currentTimeMillis()))
+        val n = s.laps.size + 1
+        val text = String.format(
+            Locale.US, "Lap %d: %.2f km in %d:%02d", n, s.lapDistanceM / 1000, s.lapMovingMs / 60000, s.lapMovingMs / 1000 % 60,
+        )
+        state.update { it.copy(laps = it.laps + mark, notice = text) }
+        buzz(longArrayOf(0, 120))
+        if (auto && ttsReady) runCatching { tts?.speak("Lap $n", TextToSpeech.QUEUE_ADD, null, "lap") }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -113,6 +171,7 @@ class TrackingService : Service(), LocationListener {
             ACTION_START -> begin()
             // The other actions only make sense while a ride is running.
             else -> if (state.value.status == TrackStatus.IDLE) stopSelf() else when (intent?.action) {
+                ACTION_LAP -> markLap(auto = false)
                 ACTION_PAUSE -> pause()
                 ACTION_RESUME -> resume()
                 ACTION_STOP -> finish(intent.getStringExtra(EXTRA_NAME), save = true)
@@ -151,8 +210,12 @@ class TrackingService : Service(), LocationListener {
         offRouteAlertOn = prefs.offRouteAlert
         turnCuesOn = prefs.turnCues
         voiceEveryKm = prefs.voiceEveryKm.coerceAtLeast(1)
+        voiceKmOn = prefs.voice
         pauseAfterMs = when (prefs.autoPauseLevel) { 0 -> 8000L; 2 -> 2500L; else -> 4000L }
-        if (prefs.voice) {
+        autoLapM = prefs.autoLapKm * 1000.0
+        lastWorkoutStep = -2
+        // A workout needs its prompts spoken even if kilometre updates are off.
+        if (prefs.voice || workout != null) {
             tts = TextToSpeech(applicationContext) { status ->
                 ttsReady = status == TextToSpeech.SUCCESS &&
                     runCatching { (tts?.setLanguage(Locale.US) ?: -2) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
@@ -162,7 +225,10 @@ class TrackingService : Service(), LocationListener {
             status = TrackStatus.RECORDING, resumedAt = System.currentTimeMillis(),
             guideTotalM = guideCum?.lastOrNull() ?: 0.0,
             gpsOff = !runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(true),
+            workoutStep = if (workout != null) 0 else -1, workoutLeftS = workout?.steps?.firstOrNull()?.seconds ?: 0,
         )
+        ticker.removeCallbacks(tick)
+        if (workout != null) ticker.postDelayed(tick, 1000)
     }
 
     @SuppressLint("WakelockTimeout")
@@ -196,6 +262,8 @@ class TrackingService : Service(), LocationListener {
             lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())
         }
         acquireWakeLock()
+        ticker.removeCallbacks(tick)
+        if (workout != null) ticker.postDelayed(tick, 1000)
         lastFix = null
         skipNextSegment = true
         stillSince = 0L
@@ -209,6 +277,8 @@ class TrackingService : Service(), LocationListener {
         val s = state.value
         runCatching { lm.removeUpdates(this) }
         releaseWakeLock()
+        ticker.removeCallbacks(tick)
+        workout = null
         runCatching { tts?.shutdown() }
         tts = null
         ttsReady = false
@@ -228,6 +298,9 @@ class TrackingService : Service(), LocationListener {
                 maxSpeedMs = s.maxSpeedMs.toDouble(),
                 elapsedS = s.elapsedMs(System.currentTimeMillis()) / 1000,
                 stops = s.stops,
+                // Whatever was ridden after the last mark is the final lap.
+                laps = if (s.laps.isEmpty()) emptyList() else if (s.lapDistanceM > 20.0)
+                    s.laps + LapMark(s.distanceM, s.movingMs, s.elapsedMs(System.currentTimeMillis())) else s.laps,
             )
         } catch (e: Exception) {
             // Keep the raw recording so the ride can be recovered on the next launch.
@@ -334,12 +407,14 @@ class TrackingService : Service(), LocationListener {
             }
         }
 
+        if (autoLapM > 0 && state.value.lapDistanceM >= autoLapM) markLap(auto = true)
+
         // Spoken update at every whole kilometre, if switched on.
         val st = state.value
         val km = (st.distanceM / 1000).toInt()
         if (km > lastSpokenKm) {
             lastSpokenKm = km
-            if (ttsReady && st.movingMs > 0 && km % voiceEveryKm == 0) {
+            if (ttsReady && voiceKmOn && st.movingMs > 0 && km % voiceEveryKm == 0) {
                 val avg = st.distanceM / (st.movingMs / 1000.0) * 3.6
                 val text = String.format(Locale.US, "%d kilometres. Average %.0f kilometres per hour.", km, avg)
                 runCatching { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "km$km") }
@@ -371,6 +446,7 @@ class TrackingService : Service(), LocationListener {
     override fun onDestroy() {
         runCatching { lm.removeUpdates(this) }
         releaseWakeLock()
+        ticker.removeCallbacks(tick)
         runCatching { tts?.shutdown() }
         if (state.value.status != TrackStatus.IDLE) {
             // The system ended the service mid-ride. Save what was recorded instead of leaving the UI frozen.
@@ -423,6 +499,7 @@ class TrackingService : Service(), LocationListener {
 
     companion object {
         const val ACTION_START = "com.cycler.app.START"
+        const val ACTION_LAP = "com.cycler.app.LAP"
         const val ACTION_PAUSE = "com.cycler.app.PAUSE"
         const val ACTION_RESUME = "com.cycler.app.RESUME"
         const val ACTION_STOP = "com.cycler.app.STOP"
@@ -438,6 +515,8 @@ class TrackingService : Service(), LocationListener {
             private set
         @Volatile private var guideCum: DoubleArray? = null
 
+        /** The interval workout to run during the next ride, chosen before pressing Start. */
+        @Volatile var workout: Workout? = null
         @Volatile private var guideTurns: List<Turn> = emptyList()
         /** Traffic signals near the followed route; a stop next to one pauses the clock sooner. */
         @Volatile var signals: List<Pt> = emptyList()

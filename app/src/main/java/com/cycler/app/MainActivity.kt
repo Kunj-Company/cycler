@@ -66,6 +66,7 @@ import com.cycler.app.data.Route
 import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteStore
 import com.cycler.app.data.RouteType
+import com.cycler.app.data.Workout
 import com.cycler.app.net.BRouter
 import com.cycler.app.net.Overpass
 import com.cycler.app.net.Weather
@@ -80,6 +81,7 @@ import com.cycler.app.ui.HeatmapScreen
 import com.cycler.app.ui.ShareScreen
 import com.cycler.app.ui.PlanScreen
 import com.cycler.app.ui.RideScreen
+import com.cycler.app.ui.RideScreenEditor
 import com.cycler.app.ui.RouteDetailScreen
 import com.cycler.app.ui.EditRideScreen
 import com.cycler.app.ui.RidesScreen
@@ -147,6 +149,16 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     var turnCues by mutableStateOf(prefs.turnCues)
     var voiceEveryKm by mutableIntStateOf(prefs.voiceEveryKm)
     var autoPauseLevel by mutableIntStateOf(prefs.autoPauseLevel)
+    var autoLapKm by mutableIntStateOf(prefs.autoLapKm)
+    var ridePages by mutableStateOf(prefs.ridePages)
+    var showFieldEditor by mutableStateOf(false)
+    /** The interval workout picked for the next ride, if any. */
+    var workout by mutableStateOf<Workout?>(null)
+    var showSegments by mutableStateOf(false)
+    var segmentId by mutableStateOf<String?>(null)
+    /** The ride a new segment is being cut from. */
+    var segmentFromRide by mutableStateOf<String?>(null)
+    var showOffline by mutableStateOf(false)
 
     var weather by mutableStateOf<Weather.Now?>(null)
         internal set
@@ -492,6 +504,11 @@ fun App(vm: MainVm) {
     if (share != null) {
         BackHandler { vm.shareId = null }
         ShareScreen(vm, share)
+        return
+    }
+    if (vm.showFieldEditor) {
+        BackHandler { vm.showFieldEditor = false }
+        RideScreenEditor(vm)
         return
     }
     val edit = vm.editId

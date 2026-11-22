@@ -14,13 +14,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Air
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Fullscreen
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.Terrain
 import androidx.compose.material.icons.outlined.TurnLeft
@@ -51,6 +55,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cycler.app.MainVm
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Pt
+import com.cycler.app.data.Workout
 import com.cycler.app.net.Weather
 import com.cycler.app.track.TrackState
 import com.cycler.app.track.TrackStatus
@@ -119,6 +124,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
         val id = st.savedId ?: return@LaunchedEffect
         TrackingService.state.update { it.copy(savedId = null) }
         vm.follow(null)
+        vm.workout = null
         // Straight to the post-ride page: title, how it felt, notes, tags, photos.
         vm.editIsNew = true
         vm.editId = id
@@ -232,6 +238,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
                         IdlePanel(vm, metas.filter { it.type == com.cycler.app.data.RouteType.RECORDED }, granted, requestPermission) {
                             follow = true
                             zoomed = false
+                            TrackingService.workout = vm.workout
                             TrackingService.send(ctx, TrackingService.ACTION_START)
                         }
                     } else {
@@ -243,7 +250,9 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
     }
 
     if (big && active) {
-        BigNumbers(vm, st, now, climbNote) { big = false }
+        val climbed = remember(st.points.size / 10) { Geo.ascent(st.points, 4.0, smooth = true) }
+        androidx.activity.compose.BackHandler { big = false }
+        BigNumbers(vm, st, now, climbed, climbNote, vm.workout) { big = false }
     }
 
     if (showFinish) {
@@ -319,7 +328,29 @@ private fun IdlePanel(
             modifier = Modifier.padding(top = 10.dp),
         )
     }
-    Spacer(Modifier.height(16.dp))
+    // An optional interval workout for this ride.
+    var pickWorkout by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 12.dp).clip(Radius).clickable { pickWorkout = true }.padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.Timer, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        val w = vm.workout
+        Text(
+            if (w == null) "Add an interval workout" else "Workout: ${w.name} · ${Fmt.dur(w.totalS.toLong())}",
+            style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f),
+            color = if (w == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+        )
+        if (w != null) {
+            Icon(
+                Icons.Outlined.Close, "Remove workout", Modifier.size(18.dp).clip(Radius).clickable { vm.workout = null },
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    if (pickWorkout) WorkoutPicker(vm) { pickWorkout = false }
+    Spacer(Modifier.height(10.dp))
     CyButton(
         if (vm.guide != null) "Start and follow route" else "Start ride", onStart,
         Modifier.fillMaxWidth(), icon = Icons.Filled.PlayArrow, height = 52.dp,
@@ -403,6 +434,13 @@ private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onBig: () -> U
         Metric("Max", Fmt.kmh(st.maxSpeedMs.toDouble()), unit = "km/h")
         Metric("Climb", "${climb.toInt()}", unit = "m")
     }
+    val w = vm.workout
+    if (w != null) {
+        Spacer(Modifier.height(12.dp))
+        Hairline()
+        Spacer(Modifier.height(10.dp))
+        WorkoutBar(w, st)
+    }
     val g = vm.guide
     if (g != null && g.meta.distanceM > 0) {
         Spacer(Modifier.height(12.dp))
@@ -421,75 +459,70 @@ private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onBig: () -> U
                 Modifier.weight(1f), Btn.SECONDARY, Icons.Filled.Pause, height = 52.dp,
             )
         }
+        CyButton(
+            "Lap ${st.laps.size + 1}", { TrackingService.send(ctx, TrackingService.ACTION_LAP) },
+            Modifier.weight(1f), Btn.SECONDARY, Icons.Outlined.Flag, enabled = !paused, height = 52.dp,
+        )
         CyButton("Finish", onFinish, Modifier.weight(1f), Btn.PRIMARY, Icons.Filled.Stop, height = 52.dp)
     }
 }
 
-/** Three huge numbers, readable at a glance on the handlebar. Tap anywhere to go back. */
+/** Pick a ready-made interval workout, or set the numbers for your own. */
 @Composable
-private fun BigNumbers(vm: MainVm, st: TrackState, now: Long, climbNote: String?, onClose: () -> Unit) {
-    androidx.compose.material3.Surface(
-        Modifier.fillMaxSize().clickable(onClick = onClose), color = MaterialTheme.colorScheme.background,
-    ) {
-        Column(
-            Modifier.fillMaxSize().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            if (st.offRoute) {
-                Text("Off route · ${st.guideOffM?.toInt() ?: 0} m", style = MaterialTheme.typography.headlineMedium, color = Cy.colors.danger)
-            } else if (st.nextTurn != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (st.nextTurnLeft) Icons.Outlined.TurnLeft else Icons.Outlined.TurnRight, null,
-                        Modifier.size(44.dp), tint = Cy.colors.accent,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text("${st.nextTurn} · ${Fmt.km(st.nextTurnM)}", style = MaterialTheme.typography.headlineMedium)
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    StatusDot(if (st.autoPaused || st.status == TrackStatus.PAUSED) Cy.colors.warn else Cy.colors.danger, 12.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        when {
-                            st.status == TrackStatus.PAUSED -> "Paused"
-                            st.autoPaused -> "Auto-paused"
-                            else -> "Recording"
-                        },
-                        style = MaterialTheme.typography.headlineSmall,
-                    )
-                }
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun WorkoutPicker(vm: MainVm, onClose: () -> Unit) {
+    val saved = remember { vm.prefs.customWorkout.split(',').mapNotNull { it.toIntOrNull() }.let { if (it.size == 5) it else listOf(10, 4, 180, 120, 10) } }
+    var warm by remember { mutableStateOf(saved[0]) }
+    var reps by remember { mutableStateOf(saved[1]) }
+    var work by remember { mutableStateOf(saved[2]) }
+    var rest by remember { mutableStateOf(saved[3]) }
+    var cool by remember { mutableStateOf(saved[4]) }
+    fun secs(s: Int) = if (s % 60 == 0) "${s / 60} min" else if (s > 60) "${s / 60} min ${s % 60} s" else "$s s"
+    AlertDialog(
+        onDismissRequest = onClose,
+        shape = RadiusLarge,
+        title = { Text("Interval workout", style = MaterialTheme.typography.titleLarge) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    Fmt.kmh(st.speedMs.toDouble()),
-                    style = MaterialTheme.typography.displayLarge.copy(
-                        fontSize = androidx.compose.ui.unit.TextUnit(128f, androidx.compose.ui.unit.TextUnitType.Sp),
-                        lineHeight = androidx.compose.ui.unit.TextUnit(132f, androidx.compose.ui.unit.TextUnitType.Sp),
-                    ),
+                    "Cycler tells you when each block starts, on screen, by vibration and aloud.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text("km/h", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(Fmt.kmNumber(st.distanceM), style = MaterialTheme.typography.displayLarge)
-                    Text("km", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                Workout.presets.forEach { w ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(Radius).clickable { vm.workout = w; onClose() }.padding(vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(w.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Text(Fmt.dur(w.totalS.toLong()), style = MaterialTheme.typography.bodySmall.tabular, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Hairline()
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        Fmt.clock(if (vm.autoPause) st.movingMs else st.elapsedMs(now)),
-                        style = MaterialTheme.typography.displayLarge,
-                    )
-                    Text(
-                        if (vm.autoPause) "moving" else "time", style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                SectionLabel("Your own", Modifier.padding(top = 16.dp, bottom = 4.dp))
+                Stepper("Warm up", "$warm min", { warm = (warm - 5).coerceAtLeast(0) }, { warm = (warm + 5).coerceAtMost(60) })
+                Stepper("Repeats", "$reps", { reps = (reps - 1).coerceAtLeast(1) }, { reps = (reps + 1).coerceAtMost(30) })
+                Stepper("Hard", secs(work), { work = (work - if (work > 120) 60 else 15).coerceAtLeast(15) }, { work = (work + if (work >= 120) 60 else 15).coerceAtMost(3600) })
+                Stepper("Easy", secs(rest), { rest = (rest - if (rest > 120) 60 else 15).coerceAtLeast(0) }, { rest = (rest + if (rest >= 120) 60 else 15).coerceAtMost(1800) })
+                Stepper("Cool down", "$cool min", { cool = (cool - 5).coerceAtLeast(0) }, { cool = (cool + 5).coerceAtMost(60) })
             }
-            Text(
-                climbNote ?: "Tap anywhere to go back", style = MaterialTheme.typography.bodyLarge,
-                color = if (climbNote != null) Cy.colors.warn else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        },
+        confirmButton = {
+            TextButton({
+                vm.prefs.customWorkout = "$warm,$reps,$work,$rest,$cool"
+                vm.workout = Workout.intervals("$reps × ${secs(work)}", warm, reps, work, rest, cool)
+                onClose()
+            }) { Text("Use my own") }
+        },
+        dismissButton = { TextButton(onClose) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+    )
+}
+
+@Composable
+private fun Stepper(label: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        CyButton("−", onMinus, Modifier.width(40.dp), Btn.SECONDARY, height = 34.dp)
+        Text(value, style = MaterialTheme.typography.titleSmall.tabular, modifier = Modifier.width(92.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        CyButton("+", onPlus, Modifier.width(40.dp), Btn.SECONDARY, height = 34.dp)
     }
 }
