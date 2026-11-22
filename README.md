@@ -35,19 +35,21 @@ Or build and install from a terminal:
 - **Plan → Loop**: pick a distance (5–200 km), get round trips in four directions.
 - **Plan → Saved**: "Suggest routes near me" (short, medium, long loops) and your saved
   routes, with GPX import.
-- **Rides**: a feed of your finished rides, newest first, with stats, route shape,
-  photos, how it felt, notes and tags.
+- **Rides**: a feed of your finished rides with stats, route shape, photos, how it felt,
+  notes and tags. Filter by week, month or year, sort, search and filter by tag.
 - **After a ride**: a save page for the title, how it felt, notes, tags, photos and videos.
   The same page edits a ride later.
-- **Activity**: this week against your goal, last 8 weeks, month and all-time totals, records.
+- **Activity**: one chart by week, month or year for distance, time or climb, with totals,
+  records and best efforts.
 - **Ride page**: attach photos and videos, see stops, stopped time and signal count.
 - **Share**: an animated 3D flyover video of the ride's map (slow start, fast middle, slow
   end), or a card in 13 swipeable styles: photo backgrounds, map backgrounds, a see-through
   sticker and more. The card's title, numbers, photo and size can be edited.
 - **Advanced stats**: a switch on each ride page for speed, time, stop, elevation and effort
   detail, worked out from the recorded points so it covers older rides too.
-- **Activity extras**: best efforts over 1, 5, 10, 20 and 40 km, all rides on one map,
-  and bike care reminders by kilometres ridden.
+- **Bike care**: jobs with kilometre or day intervals, notes and history; mark one done
+  today, on an earlier date or after a past ride. Also all rides on one map.
+- **Widgets**: Ride (start, pause, lap, live numbers), This week, Last ride, Riding stats.
 - **Segments**: cut a stretch from any ride; every ride over it is timed and ranked.
 - **Export**: FIT, TCX and GPX files, or hand a FIT file to Strava through the share sheet.
 - **Health Connect**: heart rate and weight from Samsung Health or other apps.

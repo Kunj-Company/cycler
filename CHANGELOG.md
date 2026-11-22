@@ -2,6 +2,25 @@
 
 All notable changes to Cycler. Versions are tagged in Git as `v0.1.N`.
 
+## 0.1.9
+
+### Added
+- First-launch setup: location, background recording, bike type and weekly goal.
+- Home-screen widgets: Ride (start, pause, resume, lap, live numbers), This week,
+  Last ride and Riding stats.
+- Activity chart by week, month or year for distance, time or climb, with totals and a
+  comparison with the previous period.
+- Bike care page: editable jobs with kilometre and day intervals, notes and history.
+  A job can be marked done today, on an earlier date or after a past ride.
+- Rides: period filters, sort, search and tag filter. Saved routes can be sorted.
+- About, What's new, Licence and Open-source notices pages.
+- MIT licence and third-party notices.
+
+### Changed
+- Settings is a short list of sections instead of one long page.
+- Activity page is shorter; bike care moved to its own page.
+- The bike care list is included in backups.
+
 ## 0.1.8
 
 ### Added

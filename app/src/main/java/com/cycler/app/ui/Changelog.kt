@@ -8,9 +8,12 @@ object Changelog {
         Version(
             "0.1.9",
             listOf(
-                "A short setup flow the first time you open the app.",
-                "Settings reorganised into sections that are easier to find your way around.",
-                "About, What's new and licence pages.",
+                "A short setup the first time you open the app.",
+                "Home-screen widgets: Ride (start, pause, lap), This week, Last ride and Riding stats.",
+                "Activity: one chart by week, month or year for distance, time or climb.",
+                "Bike care page: edit jobs, add your own, and mark one done today, on an earlier date or after a ride.",
+                "Rides: filter by this week, month or year, sort, search and filter by tag.",
+                "Settings in sections, with About, What's new and licence pages.",
                 "Cycler is now open source under the MIT licence.",
             ),
         ),
