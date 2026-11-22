@@ -1,9 +1,9 @@
 package com.cycler.app.ui
 
-import android.content.Intent
-import android.net.Uri
-import android.provider.Settings
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,42 +12,54 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ChevronLeft
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cycler.app.MainVm
+import com.cycler.app.data.Bucket
+import com.cycler.app.data.Care
+import com.cycler.app.data.Insights
+import com.cycler.app.data.Measure
+import com.cycler.app.data.Period
 import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteType
+import com.cycler.app.data.Totals
 import com.cycler.app.net.BRouter
 import java.util.Calendar
-import kotlinx.coroutines.launch
 import java.util.Locale
 
 object Stats {
@@ -86,15 +98,43 @@ object Stats {
     }
 }
 
+
+/** The number and unit shown for a measure; time carries its unit inside the number. */
+private fun valueText(m: Measure, distanceM: Double, durationS: Long, ascentM: Double): Pair<String, String?> = when (m) {
+    Measure.DISTANCE -> String.format(Locale.US, "%.1f", distanceM / 1000) to "km"
+    Measure.TIME -> Fmt.dur(durationS) to null
+    Measure.CLIMB -> "${ascentM.toInt()}" to "m"
+}
+
+/** Week, month and year at a glance: one chart you can tap, a row of totals, records and links. */
 @Composable
-fun ActivityScreen(vm: MainVm) {
+fun ActivityScreen(vm: MainVm, initialPeriod: Period = Period.WEEK, now: Long = System.currentTimeMillis(), initialSelected: Int = -1) {
     val metas by vm.store.metas.collectAsState()
     val rides = remember(metas) { metas.filter { it.type == RouteType.RECORDED } }
-    val week = remember(rides) { Stats.since(rides, Stats.weekStart()) }
-    val month = remember(rides) { Stats.since(rides, Stats.monthStart()) }
-    val all = remember(rides) { Stats.since(rides, 0) }
-    val weekly = remember(rides) { Stats.weekly(rides) }
     val goal = vm.weeklyGoalKm
+
+    var periodIx by rememberSaveable { mutableIntStateOf(initialPeriod.ordinal) }
+    var back by rememberSaveable { mutableIntStateOf(0) }
+    var measureIx by rememberSaveable { mutableIntStateOf(0) }
+    var selected by rememberSaveable { mutableIntStateOf(initialSelected) }
+    var showAllEfforts by rememberSaveable { mutableStateOf(false) }
+    val period = Period.values()[periodIx]
+    val measure = Measure.values()[measureIx]
+
+    val span = remember(period, back, now) { Insights.span(period, now, back) }
+    val prevSpan = remember(period, back, now) { Insights.span(period, now, back + 1) }
+    val buckets = remember(rides, span) { Insights.buckets(rides, span) }
+    val total = remember(rides, span) { Insights.totals(rides, span) }
+    val prev = remember(rides, prevSpan) { Insights.totals(rides, prevSpan) }
+    val earliest = remember(rides) { rides.minOfOrNull { it.createdAt } ?: Long.MAX_VALUE }
+    val sel = buckets.getOrNull(selected)?.takeIf { it.start <= now }
+    val avg = remember(buckets, measure, now) { Insights.average(buckets, measure, now) }
+    val todayIx = Insights.indexAt(buckets, now)
+    val prevName = when (period) {
+        Period.WEEK -> if (back == 0) "last week" else "the week before"
+        Period.MONTH -> if (back == 0) "last month" else "the month before"
+        Period.YEAR -> if (back == 0) "last year" else "the year before"
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -102,53 +142,103 @@ fun ActivityScreen(vm: MainVm) {
             IconButton({ vm.showSettings = true }) { Icon(Icons.Outlined.Settings, "Settings") }
         }
 
-        Spacer(Modifier.height(14.dp))
-        SectionLabel("This week")
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(String.format(Locale.US, "%.1f", week.distanceM / 1000), style = MaterialTheme.typography.displayLarge)
-            Text(
-                " km", style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 9.dp),
-            )
+        Spacer(Modifier.height(10.dp))
+        Segmented(Period.values().map { it.label }, periodIx, { periodIx = it; back = 0; selected = -1 }, Modifier.fillMaxWidth())
+
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(Insights.title(span), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            IconButton({ back++; selected = -1 }, enabled = earliest < span.start) {
+                Icon(Icons.Outlined.ChevronLeft, "Earlier")
+            }
+            IconButton({ back--; selected = -1 }, enabled = back > 0) {
+                Icon(Icons.Outlined.ChevronRight, "Later")
+            }
         }
-        Spacer(Modifier.height(6.dp))
-        Progress(
-            (week.distanceM / 1000 / goal).toFloat(),
-            color = if (week.distanceM / 1000 >= goal) Cy.colors.success else Cy.colors.accent,
-        )
-        val left = goal - week.distanceM / 1000
+
+        // What the chart says right now: the tapped bar, or the whole period.
+        val (big, unit) = if (sel != null) valueText(measure, sel.distanceM, sel.durationS, sel.ascentM)
+        else valueText(measure, total.distanceM, total.durationS, total.ascentM)
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.Bottom) {
+            Text(big, style = MaterialTheme.typography.displaySmall, maxLines = 1)
+            if (unit != null) {
+                Text(
+                    " $unit", style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            if (avg > 0) {
+                val (a, au) = valueText(measure, avg * 1000, (avg * 3600).toLong(), avg)
+                Text(
+                    "– – avg $a${if (au != null) " $au" else ""}", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp),
+                )
+            }
+        }
         Text(
-            if (left <= 0) "Weekly goal of $goal km reached"
-            else String.format(Locale.US, "%.1f km to go to your %d km goal", left, goal),
+            if (sel != null) Insights.bucketTitle(period, sel) + if (sel.rides > 0) " · ${sel.rides} ride${if (sel.rides > 1) "s" else ""}" else " · no rides"
+            else "Total · ${total.rides} ride${if (total.rides == 1) "" else "s"}",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp),
         )
-        Spacer(Modifier.height(16.dp))
-        MetricRow(week)
 
-        Spacer(Modifier.height(28.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            SectionLabel("Last 8 weeks")
-            Text(
-                "– – goal", style = MaterialTheme.typography.labelSmall, color = Cy.colors.accent,
-            )
-        }
         Spacer(Modifier.height(12.dp))
-        WeekBars(weekly, goal)
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("7 weeks ago", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("This week", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        ActivityChart(
+            values = buckets.map { it.value(measure) }, selectable = buckets.map { it.start <= now },
+            selected = sel?.let { selected }, average = avg,
+            onSelect = { i -> selected = if (i == selected) -1 else i },
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            buckets.forEachIndexed { i, b ->
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        Insights.axisLabel(period, b), style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false,
+                        fontWeight = if (i == todayIx) FontWeight.Bold else null,
+                        color = if (i == todayIx) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.wrapContentWidth(Alignment.CenterHorizontally, unbounded = true),
+                    )
+                }
+            }
         }
 
-        Spacer(Modifier.height(28.dp))
-        SectionLabel("This month")
-        Spacer(Modifier.height(10.dp))
-        MetricRow(month, withDistance = true)
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Measure.values().forEach { m -> FilterPill(m.label, m == measure, { measureIx = m.ordinal }) }
+        }
 
-        Spacer(Modifier.height(28.dp))
-        SectionLabel("All time")
-        Spacer(Modifier.height(10.dp))
-        MetricRow(all, withDistance = true)
+        Spacer(Modifier.height(16.dp))
+        Hairline()
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth()) {
+            Metric("Distance", Fmt.kmShort(total.distanceM), Modifier.weight(1.1f), unit = "km")
+            Metric("Rides", "${total.rides}", Modifier.weight(0.8f))
+            Metric("Time", Fmt.dur(total.durationS), Modifier.weight(1.1f))
+            Metric("Climb", "${total.ascentM.toInt()}", Modifier.weight(0.9f), unit = "m")
+        }
+        val compare = Insights.compare(measure, total, prev, prevName)
+        val showGoal = period == Period.WEEK && measure == Measure.DISTANCE
+        if (showGoal || compare != null) {
+            Spacer(Modifier.height(12.dp))
+            if (showGoal) {
+                val km = total.distanceM / 1000
+                Progress((km / goal).toFloat(), color = if (km >= goal) Cy.colors.success else Cy.colors.accent)
+                Spacer(Modifier.height(6.dp))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = if (showGoal) Arrangement.SpaceBetween else Arrangement.Start) {
+                if (showGoal) {
+                    val km = total.distanceM / 1000
+                    Text(
+                        if (km >= goal) "Weekly goal of $goal km reached" else String.format(Locale.US, "%.1f of %d km goal", km, goal),
+                        style = MaterialTheme.typography.bodySmall.tabular, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (compare != null) {
+                    Text(
+                        compare, style = MaterialTheme.typography.bodySmall.tabular,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
 
         if (rides.isEmpty()) {
             Spacer(Modifier.height(28.dp))
@@ -157,9 +247,9 @@ fun ActivityScreen(vm: MainVm) {
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(26.dp))
             SectionLabel("Records")
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             val longest = rides.maxByOrNull { it.distanceM }
             val climbiest = rides.maxByOrNull { it.ascentM }
             val fastest = rides.filter { it.durationS > 600 }.maxByOrNull { it.distanceM / it.durationS }
@@ -172,68 +262,133 @@ fun ActivityScreen(vm: MainVm) {
                 rides.filter { it.bests[km] != null }.minByOrNull { it.bests[km]!! }?.let { km to it }
             }
             if (efforts.isNotEmpty()) {
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(22.dp))
                 SectionLabel("Best efforts")
-                Spacer(Modifier.height(4.dp))
-                efforts.forEach { (km, m) ->
-                    val s = m.bests[km]!!
-                    RecordRow("Fastest $km km", Fmt.clock(s * 1000) + String.format(Locale.US, "  ·  %.1f km/h", km * 3600.0 / s), m) { vm.detailId = m.id }
+                Spacer(Modifier.height(2.dp))
+                (if (showAllEfforts) efforts else efforts.take(3)).forEach { (km, m) ->
+                    val sec = m.bests[km]!!
+                    RecordRow("Fastest $km km", Fmt.clock(sec * 1000) + String.format(Locale.US, "  ·  %.1f km/h", km * 3600.0 / sec), m) { vm.detailId = m.id }
                 }
-            }
-
-            Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CyButton("Segments", { vm.showSegments = true }, Modifier.weight(1f), Btn.SECONDARY)
-                CyButton("All rides map", { vm.showHeatmap = true }, Modifier.weight(1f), Btn.SECONDARY)
+                if (efforts.size > 3) {
+                    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { showAllEfforts = !showAllEfforts }, contentAlignment = Alignment.CenterStart) {
+                        Text(
+                            if (showAllEfforts) "Show fewer" else "Show all ${efforts.size}",
+                            style = MaterialTheme.typography.labelLarge, color = Cy.colors.accent,
+                        )
+                    }
+                }
             }
         }
 
-        // Bike care: kilometres ridden since each job was last done.
-        Spacer(Modifier.height(28.dp))
-        SectionLabel("Bike care")
-        Spacer(Modifier.height(4.dp))
-        vm.care.forEachIndexed { i, item ->
-            val used = rides.filter { it.createdAt > item.resetAt }.sumOf { it.distanceM } / 1000
-            val due = used >= item.everyKm
-            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                    Text(item.name, style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        if (due) "Due now · ${used.toInt()} km since last done"
-                        else "${used.toInt()} of ${item.everyKm} km",
-                        style = MaterialTheme.typography.bodySmall.tabular,
-                        color = if (due) Cy.colors.warn else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Progress((used / item.everyKm).toFloat(), color = if (due) Cy.colors.warn else MaterialTheme.colorScheme.onSurface)
-                }
-                CyButton("Done", {
-                    vm.saveCare(vm.care.mapIndexed { k, c -> if (k == i) c.copy(resetAt = System.currentTimeMillis()) else c })
-                }, kind = Btn.SECONDARY, height = 36.dp)
-            }
-            Hairline()
-        }
+        Spacer(Modifier.height(22.dp))
+        val segTick by vm.store.segTick.collectAsState()
+        val segCount = remember(segTick) { vm.store.segments().size }
+        val due = remember(vm.care, rides, now) { Care.dueCount(vm.care, rides, now) }
+        Hairline()
+        LinkRow("Segments", if (segCount == 0) "None yet" else "$segCount saved") { vm.showSegments = true }
+        LinkRow("All rides map", "${rides.size} ride${if (rides.size == 1) "" else "s"}") { vm.showHeatmap = true }
+        LinkRow(
+            "Bike care",
+            when {
+                vm.care.isEmpty() -> "Nothing tracked"
+                due == 0 -> "All up to date"
+                else -> "$due job${if (due > 1) "s" else ""} due"
+            },
+            statusColor = if (due > 0) Cy.colors.warn else null,
+        ) { vm.showCare = true }
         Spacer(Modifier.height(24.dp))
     }
 }
 
+/**
+ * Bars for one period. A tap or a drag picks a bar; the picked one turns accent blue and the rest
+ * fade back. Bars that lie in the future stay empty and cannot be picked.
+ */
 @Composable
-private fun MetricRow(s: Stats.Sum, withDistance: Boolean = false) {
-    Row(Modifier.fillMaxWidth()) {
-        if (withDistance) Metric("Distance", Fmt.kmShort(s.distanceM), Modifier.weight(1f), unit = "km")
-        Metric("Rides", "${s.rides}", Modifier.weight(1f))
-        Metric("Time", Fmt.dur(s.durationS), Modifier.weight(1f))
-        Metric("Climb", "${s.ascentM.toInt()}", Modifier.weight(1f), unit = "m")
+private fun ActivityChart(
+    values: List<Double>, selectable: List<Boolean>, selected: Int?, average: Double, onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    val accent = Cy.colors.accent
+    val faint = Cy.colors.border
+    val avgColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    val n = values.size
+    Canvas(
+        modifier.fillMaxWidth().height(136.dp)
+            .pointerInput(n, selectable) {
+                detectTapGestures { p ->
+                    val i = (p.x / size.width * n).toInt().coerceIn(0, n - 1)
+                    if (selectable.getOrElse(i) { false }) onSelect(i)
+                }
+            }
+            .pointerInput(n, selectable, selected) {
+                var last = -1
+                detectHorizontalDragGestures(onDragStart = { last = -1 }) { change, _ ->
+                    val i = (change.position.x / size.width * n).toInt().coerceIn(0, n - 1)
+                    if (i != last && selectable.getOrElse(i) { false }) { last = i; if (i != selected) onSelect(i) }
+                }
+            },
+    ) {
+        if (n == 0) return@Canvas
+        val top = maxOf(values.maxOrNull() ?: 0.0, average, 1e-6) * 1.08
+        val slot = size.width / n
+        val barW = (slot * 0.64f).coerceAtMost(34.dp.toPx())
+        val minH = 2.dp.toPx()
+        val radius = CornerRadius(minOf(3.dp.toPx(), barW / 2))
+        val base = size.height
+        drawLine(faint, Offset(0f, base), Offset(size.width, base), 1.dp.toPx())
+        values.forEachIndexed { i, v ->
+            val x = i * slot + (slot - barW) / 2
+            if (!selectable[i]) {
+                drawRoundRect(faint.copy(alpha = 0.6f), Offset(x, base - minH), Size(barW, minH), radius)
+                return@forEachIndexed
+            }
+            val h = (v / top * base).toFloat().coerceAtLeast(minH)
+            val color = when {
+                v <= 0.0 -> faint
+                selected == i -> accent
+                selected == null -> ink.copy(alpha = 0.88f)
+                else -> ink.copy(alpha = 0.26f)
+            }
+            drawRoundRect(color, Offset(x, base - h), Size(barW, h), radius)
+        }
+        if (average > 0) {
+            val y = (base - average / top * base).toFloat()
+            drawLine(
+                avgColor, Offset(0f, y), Offset(size.width, y), 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)),
+            )
+        }
     }
+}
+
+@Composable
+private fun LinkRow(title: String, status: String, statusColor: androidx.compose.ui.graphics.Color? = null, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+        Text(
+            status, style = MaterialTheme.typography.bodySmall.tabular,
+            color = statusColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Icon(
+            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.padding(start = 4.dp).size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    Hairline()
 }
 
 @Composable
 private fun RecordRow(label: String, value: String, m: RouteMeta, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
             Text(label, style = MaterialTheme.typography.bodyLarge)
             Text(
                 "${m.name} · ${Fmt.day(m.createdAt)}", style = MaterialTheme.typography.bodySmall,
@@ -242,7 +397,7 @@ private fun RecordRow(label: String, value: String, m: RouteMeta, onClick: () ->
         }
         Text(value, style = MaterialTheme.typography.titleMedium.tabular)
         Icon(
-            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(20.dp),
+            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.padding(start = 4.dp).size(20.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
