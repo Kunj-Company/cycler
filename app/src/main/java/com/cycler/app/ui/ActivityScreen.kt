@@ -163,6 +163,49 @@ fun ActivityScreen(vm: MainVm) {
             longest?.let { RecordRow("Longest ride", Fmt.km(it.distanceM), it) { vm.detailId = it.id } }
             climbiest?.let { RecordRow("Most climbing", "${it.ascentM.toInt()} m", it) { vm.detailId = it.id } }
             fastest?.let { RecordRow("Fastest average", Fmt.kmh(it.distanceM / it.durationS) + " km/h", it) { vm.detailId = it.id } }
+
+            // Fastest time over set distances, found anywhere inside any ride.
+            val efforts = com.cycler.app.data.Geo.EFFORTS.mapNotNull { km ->
+                rides.filter { it.bests[km] != null }.minByOrNull { it.bests[km]!! }?.let { km to it }
+            }
+            if (efforts.isNotEmpty()) {
+                Spacer(Modifier.height(28.dp))
+                SectionLabel("Best efforts")
+                Spacer(Modifier.height(4.dp))
+                efforts.forEach { (km, m) ->
+                    val s = m.bests[km]!!
+                    RecordRow("Fastest $km km", Fmt.clock(s * 1000) + String.format(Locale.US, "  ·  %.1f km/h", km * 3600.0 / s), m) { vm.detailId = m.id }
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            CyButton("See all rides on one map", { vm.showHeatmap = true }, Modifier.fillMaxWidth(), Btn.SECONDARY)
+        }
+
+        // Bike care: kilometres ridden since each job was last done.
+        Spacer(Modifier.height(28.dp))
+        SectionLabel("Bike care")
+        Spacer(Modifier.height(4.dp))
+        vm.care.forEachIndexed { i, item ->
+            val used = rides.filter { it.createdAt > item.resetAt }.sumOf { it.distanceM } / 1000
+            val due = used >= item.everyKm
+            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(item.name, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        if (due) "Due now · ${used.toInt()} km since last done"
+                        else "${used.toInt()} of ${item.everyKm} km",
+                        style = MaterialTheme.typography.bodySmall.tabular,
+                        color = if (due) Cy.colors.warn else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Progress((used / item.everyKm).toFloat(), color = if (due) Cy.colors.warn else MaterialTheme.colorScheme.onSurface)
+                }
+                CyButton("Done", {
+                    vm.saveCare(vm.care.mapIndexed { k, c -> if (k == i) c.copy(resetAt = System.currentTimeMillis()) else c })
+                }, kind = Btn.SECONDARY, height = 36.dp)
+            }
+            Hairline()
         }
         Spacer(Modifier.height(24.dp))
     }
@@ -339,4 +382,40 @@ private fun ToggleRow(title: String, note: String, checked: Boolean, onChange: (
         )
     }
     Hairline()
+}
+
+/** Every recorded ride drawn on one map; roads ridden often show darker. */
+@Composable
+fun HeatmapScreen(vm: MainVm) {
+    val metas by vm.store.metas.collectAsState()
+    val rides = remember(metas) { metas.filter { it.type == RouteType.RECORDED } }
+    val lines by androidx.compose.runtime.produceState(emptyList<MapLine>(), rides) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            rides.mapNotNull { m ->
+                vm.store.load(m.id)?.pts?.let { pts ->
+                    val step = pts.size / 400 + 1
+                    MapLine(pts.filterIndexed { i, _ -> i % step == 0 || i == pts.size - 1 }, COLOR_TRACK, 4f, 0.45f)
+                }
+            }
+        }
+    }
+    val camera = remember(lines) { if (lines.isEmpty()) null else CameraCmd(lines.flatMap { l -> listOf(l.pts.first(), l.pts[l.pts.size / 2], l.pts.last()) } + lines.flatMap { it.pts.filterIndexed { i, _ -> i % 25 == 0 } }) }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Row(Modifier.padding(start = 6.dp, top = 2.dp, end = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton({ vm.showHeatmap = false }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
+                Column(Modifier.weight(1f)) {
+                    Text("All rides", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        "${rides.size} rides · ${Fmt.km(rides.sumOf { it.distanceM })}",
+                        style = MaterialTheme.typography.bodySmall.tabular, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                CyclerMap(Modifier.fillMaxSize(), vm.mapStyle, lines, emptyList(), camera, initial = vm.prefs.lastLoc)
+                LayerButton(vm.mapStyle, Modifier.align(Alignment.BottomEnd).padding(12.dp)) { vm.mapStyle = it; vm.prefs.mapStyle = it }
+            }
+        }
+    }
 }

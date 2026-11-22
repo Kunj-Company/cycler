@@ -96,4 +96,52 @@ class GeoTest {
         assertEquals(Difficulty.MODERATE, Difficulty.of(30_000.0, 300.0))
         assertEquals(Difficulty.HARD, Difficulty.of(60_000.0, 900.0))
     }
+
+    @Test fun turns_are_found_with_side_and_position() {
+        // North 1 km, right turn, east 1 km, left turn, north 1 km.
+        val a = (0..10).map { Geo.destination(start.lat, start.lon, 0.0, it * 100.0) }
+        val b = (1..10).map { Geo.destination(a.last().lat, a.last().lon, 90.0, it * 100.0) }
+        val c = (1..10).map { Geo.destination(b.last().lat, b.last().lon, 0.0, it * 100.0) }
+        val route = a + b + c
+        val turns = Geo.turns(route, Geo.cumulative(route))
+        assertEquals(2, turns.size)
+        assertEquals("Turn right", turns[0].label)
+        assertEquals(1000.0, turns[0].alongM, 30.0)
+        assertEquals("Turn left", turns[1].label)
+        assertEquals(2000.0, turns[1].alongM, 30.0)
+        // A straight road and a gentle curve have none.
+        assertEquals(0, Geo.turns(north(30), Geo.cumulative(north(30))).size)
+        val curve = (0..60).map { Geo.destination(start.lat, start.lon, it * 1.0, 3000.0) }
+        assertEquals(0, Geo.turns(curve, Geo.cumulative(curve)).size)
+    }
+
+    @Test fun climbs_are_found_and_measured() {
+        // Flat 2 km, then 2 km climbing 100 m (5%), then flat 2 km.
+        val route = north(60).mapIndexed { i, p ->
+            p.copy(ele = 900.0 + when { i < 20 -> 0.0; i < 40 -> (i - 20) * 5.0; else -> 100.0 })
+        }
+        val climbs = Geo.climbs(route, Geo.cumulative(route))
+        assertEquals(1, climbs.size)
+        assertEquals(2000.0, climbs[0].startM, 200.0)
+        assertEquals(4000.0, climbs[0].endM, 200.0)
+        assertEquals(100.0, climbs[0].gainM, 8.0)
+        assertEquals(5.0, climbs[0].gradePct, 0.8)
+        // Rolling bumps of a few metres are not climbs.
+        val bumpy = north(60).mapIndexed { i, p -> p.copy(ele = 900.0 + if (i % 4 < 2) 3.0 else 0.0) }
+        assertEquals(0, Geo.climbs(bumpy, Geo.cumulative(bumpy)).size)
+    }
+
+    @Test fun best_effort_finds_the_fast_stretch() {
+        // 10 km: first 5 km at 18 km/h (20 s per 100 m), last 5 km at 36 km/h (10 s per 100 m).
+        var t = 1_000_000L
+        val pts = north(100).mapIndexed { i, p ->
+            if (i > 0) t += if (i <= 50) 20_000L else 10_000L
+            p.copy(t = t)
+        }
+        val bests = Geo.bestEfforts(pts)
+        assertEquals(500.0, bests[5]!!.toDouble(), 12.0)   // the fast half: 5 km in 500 s
+        assertEquals(1500.0, bests[10]!!.toDouble(), 25.0) // the whole ride
+        assertEquals(100.0, bests[1]!!.toDouble(), 12.0)
+        assertTrue(20 !in bests)
+    }
 }

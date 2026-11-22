@@ -85,6 +85,9 @@ class Screenshots {
                 CyclerTheme(if (dark) "dark" else "light") { content() }
             }
         }
+        // Give background loading (files, images) a moment to land before the picture is taken.
+        repeat(3) { rule.waitForIdle(); Thread.sleep(250) }
+        rule.waitForIdle()
         rule.onRoot().captureRoboImage("build/shots/$name.png")
     }
 
@@ -116,6 +119,19 @@ class Screenshots {
         recording(offRoute = true)
         shell("04_ride_off_route", Tab.RIDE)
     }
+    @Test fun ride_following_turn() {
+        vm.follow(vm.store.load(vm.store.metas.value.first { it.name == "Nandi foothills" }.id))
+        recording()
+        TrackingService.state.value = TrackingService.state.value.copy(
+            nextTurn = "Turn left", nextTurnLeft = true, nextTurnM = 180.0, guideTotalM = 62_300.0, stops = 3,
+        )
+        shell("04b_ride_turn_cue", Tab.RIDE)
+    }
+    @Test fun share_video() {
+        val id = vm.store.metas.value.first { it.name == "Nandi foothills" }.id
+        shot("16_share_video") { com.cycler.app.ui.ShareScreen(vm, id) }
+    }
+    @Test fun heatmap() = shot("17_all_rides") { com.cycler.app.ui.HeatmapScreen(vm) }
     @Test fun ride_recording_dark() { recording(); shell("05_ride_recording_dark", Tab.RIDE, dark = true) }
     @Test fun plan_empty() = shell("06_plan_empty", Tab.PLAN)
     @Test fun plan_ab_results() {

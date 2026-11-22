@@ -20,6 +20,8 @@ Or install the prebuilt debug build directly:
   warning before you start. Switch map style from the map itself.
 - **Follow a route**: pick any saved or planned route and ride it. Shows distance to go,
   and vibrates if you leave the route.
+- **While following**: the next turn and its distance, a nudge before each turn, climbs
+  coming up, traffic signals on the map, and a big-number screen for the handlebar.
 - **Plan → A to B**: Start and End fields, optional stops, search or long-press the map.
   Up to three routes with distance, climb, time, difficulty and an elevation profile.
 - **Plan → Loop**: pick a distance (5–200 km), get round trips in four directions.
@@ -27,6 +29,11 @@ Or install the prebuilt debug build directly:
 - **Routes**: "Suggest routes near me" (short, medium, long loops), plus everything saved,
   with outline, stats, difficulty, rename, delete, GPX import/export.
 - **Activity**: this week against your goal, last 8 weeks, month and all-time totals, records.
+- **Ride page**: attach photos and videos, see stops, stopped time and signal count.
+- **Share**: an animated 3D flyover video of the ride (slow start, fast middle, slow end,
+  then your photos and a summary), or a still card. Both go to the system share sheet.
+- **Activity extras**: best efforts over 1, 5, 10, 20 and 40 km, all rides on one map,
+  and bike care reminders by kilometres ridden.
 - **Settings**: light/dark, map style, bike type, auto-pause, off-route alert,
   spoken updates every kilometre, weekly goal.
 
@@ -36,6 +43,7 @@ Or install the prebuilt debug build directly:
 - Routing and elevation: BRouter public server (brouter.de)
 - Place search: Photon (photon.komoot.io)
 - Weather: Open-Meteo
+- Traffic signals: Overpass API (OpenStreetMap data)
 
 These are shared community servers, fine for personal use. Maps, planning and weather
 need internet; recording does not.
@@ -57,6 +65,7 @@ The map is drawn as a sketch there; real tiles only appear on a device.
 
 - `data/` models, geometry, JSON file storage, GPX
 - `net/Net.kt` BRouter, Photon and weather calls
+- `share/` the share card, the flyover renderer and the MP4 encoder
 - `track/TrackingService.kt` foreground GPS recording, auto-pause, off-route alerts
 - `ui/` theme, components, screens and the map wrapper
 - `MainActivity.kt` app shell and planning logic

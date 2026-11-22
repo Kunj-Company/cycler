@@ -153,3 +153,38 @@ object Weather {
         )
     }
 }
+
+/** Traffic signals from OpenStreetMap via the Overpass API — free, no key. Can take half a minute. */
+object Overpass {
+    /** Signals within about 25 m of [route]. Throws on network trouble. */
+    fun signalsAlong(route: List<Pt>): List<Pt> {
+        if (route.size < 2) return emptyList()
+        val pad = 0.0005
+        val s = route.minOf { it.lat } - pad
+        val n = route.maxOf { it.lat } + pad
+        val w = route.minOf { it.lon } - pad
+        val e = route.maxOf { it.lon } + pad
+        // Very large areas would be slow and heavy on the shared server.
+        if ((n - s) * (e - w) > 1.0) return emptyList()
+        val q = String.format(
+            Locale.US, "[out:json][timeout:40];node[\"highway\"=\"traffic_signals\"](%.5f,%.5f,%.5f,%.5f);out;", s, w, n, e,
+        )
+        val body = httpGet("https://overpass-api.de/api/interpreter?data=" + URLEncoder.encode(q, "UTF-8"), 60000)
+        val els = JSONObject(body).getJSONArray("elements")
+        val cum = Geo.cumulative(route)
+        val near = ArrayList<Pair<Double, Pt>>()
+        for (i in 0 until els.length()) {
+            val o = els.getJSONObject(i)
+            val p = Pt(o.getDouble("lat"), o.getDouble("lon"))
+            val (d, along, _) = Geo.nearestOnRoute(p, route, cum, -1e9)
+            if (d <= 25.0) near.add(along to p)
+        }
+        // A big junction has several signal heads; count each junction once.
+        val out = ArrayList<Pt>()
+        var lastAlong = -1e9
+        for ((along, p) in near.sortedBy { it.first }) {
+            if (along - lastAlong > 60.0) { out.add(p); lastAlong = along }
+        }
+        return out
+    }
+}

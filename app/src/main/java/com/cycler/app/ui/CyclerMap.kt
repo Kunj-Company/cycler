@@ -40,7 +40,7 @@ import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonSource
 
-class MapLine(val pts: List<Pt>, val color: String, val width: Float = 5f)
+class MapLine(val pts: List<Pt>, val color: String, val width: Float = 5f, val opacity: Float = 1f)
 class MapDot(val pt: Pt, val color: String, val radius: Float = 7f)
 
 /** One point = centre on it (optionally with zoom); several = fit them all. A new instance moves the camera. */
@@ -84,7 +84,7 @@ private fun linesJson(lines: List<MapLine>): String {
         for (p in l.pts) coords.put(JSONArray().put(p.lon).put(p.lat))
         feats.put(
             JSONObject().put("type", "Feature")
-                .put("properties", JSONObject().put("color", l.color).put("width", l.width.toDouble()))
+                .put("properties", JSONObject().put("color", l.color).put("width", l.width.toDouble()).put("opacity", l.opacity.toDouble()))
                 .put("geometry", JSONObject().put("type", "LineString").put("coordinates", coords))
         )
     }
@@ -191,7 +191,7 @@ fun CyclerMap(
                     PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                     PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     PropertyFactory.lineColor("#ffffff"),
-                    PropertyFactory.lineOpacity(0.8f),
+                    PropertyFactory.lineOpacity(Expression.product(Expression.get("opacity"), Expression.literal(0.8f))),
                     PropertyFactory.lineWidth(Expression.sum(Expression.get("width"), Expression.literal(3))),
                 )
             )
@@ -200,6 +200,7 @@ fun CyclerMap(
                     PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                     PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
                     PropertyFactory.lineColor(Expression.toColor(Expression.get("color"))),
+                    PropertyFactory.lineOpacity(Expression.get("opacity")),
                     PropertyFactory.lineWidth(Expression.get("width")),
                 )
             )
@@ -268,7 +269,7 @@ private fun MapPlaceholder(modifier: Modifier, lines: List<MapLine>, dots: List<
         for (l in lines) {
             val path = androidx.compose.ui.graphics.Path()
             l.pts.forEachIndexed { i, p -> val o = pos(p); if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y) }
-            drawPath(path, Color(android.graphics.Color.parseColor(l.color)), style = androidx.compose.ui.graphics.drawscope.Stroke(l.width * 2.6f))
+            drawPath(path, Color(android.graphics.Color.parseColor(l.color)).copy(alpha = l.opacity), style = androidx.compose.ui.graphics.drawscope.Stroke(l.width * 2.6f))
         }
         for (d in dots) {
             drawCircle(Color.White, d.radius * 2.6f + 6f, pos(d.pt))

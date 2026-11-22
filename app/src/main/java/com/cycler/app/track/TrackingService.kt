@@ -31,6 +31,7 @@ import com.cycler.app.data.Prefs
 import com.cycler.app.data.Pt
 import com.cycler.app.data.RouteStore
 import com.cycler.app.data.RouteType
+import com.cycler.app.data.Turn
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,6 +60,12 @@ data class TrackState(
     val offRoute: Boolean = false,
     /** Length of the followed route, measured the same way as [guideDoneM]. */
     val guideTotalM: Double = 0.0,
+    /** The next turn on the followed route, e.g. "Turn left", and how far away it is. */
+    val nextTurn: String? = null,
+    val nextTurnLeft: Boolean = false,
+    val nextTurnM: Double = 0.0,
+    /** Times the rider has come to a stop so far. */
+    val stops: Int = 0,
     /** Location is switched off on the phone, so nothing can be recorded. */
     val gpsOff: Boolean = false,
     /** A one-off message for the rider, e.g. why a ride could not start. */
@@ -89,6 +96,7 @@ class TrackingService : Service(), LocationListener {
     private var lastSpokenKm = 0
     /** Off-route alerts only start once the rider has actually been on the route. */
     private var onRouteSeen = false
+    private var lastCued: Turn? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -129,6 +137,7 @@ class TrackingService : Service(), LocationListener {
         acquireWakeLock()
         RouteStore.get(this).recordingFile.delete()
         onRouteSeen = false
+        lastCued = null
         lastFix = null
         skipNextSegment = false
         stillSince = 0L
@@ -212,6 +221,7 @@ class TrackingService : Service(), LocationListener {
                 createdAt = s.points.first().t,
                 maxSpeedMs = s.maxSpeedMs.toDouble(),
                 elapsedS = s.elapsedMs(System.currentTimeMillis()) / 1000,
+                stops = s.stops,
             )
         } catch (e: Exception) {
             // Keep the raw recording so the ride can be recovered on the next launch.
@@ -257,18 +267,25 @@ class TrackingService : Service(), LocationListener {
         if (speed < 0.8f) {
             if (stillSince == 0L) stillSince = loc.time
         } else stillSince = 0L
-        val paused = autoPauseOn && stillSince != 0L && loc.time - stillSince >= 4000
+        // At a known traffic signal a stop is almost certainly a real one, so pause sooner.
+        val atSignal = signals.any { Geo.dist(it, pt) < 45.0 }
+        val paused = autoPauseOn && stillSince != 0L && loc.time - stillSince >= (if (atSignal) 1500 else 4000)
+        val newStop = paused && !s.autoPaused
 
         // Following a route: how far off it are we, and how far along?
         var off: Double? = null
         var done = s.guideDoneM
         var offRoute = s.offRoute
+        var nextTurn: Turn? = null
         val g = guide
         val gc = guideCum
         if (g != null && gc != null && g.size >= 2) {
             val (d, along, _) = Geo.nearestOnRoute(pt, g, gc, done)
             off = d
-            if (d <= 60.0) done = along
+            if (d <= 60.0) {
+                done = along
+                nextTurn = guideTurns.firstOrNull { it.alongM > along + 5.0 }
+            }
             if (d < 30.0) onRouteSeen = true
             if (d > 50.0) offCount++ else if (d < 30.0) offCount = 0
             // Riding to the start of a route is not "off route".
@@ -293,7 +310,22 @@ class TrackingService : Service(), LocationListener {
                 guideOffM = off,
                 guideDoneM = done,
                 offRoute = offRoute,
+                nextTurn = nextTurn?.label,
+                nextTurnLeft = nextTurn?.left ?: false,
+                nextTurnM = nextTurn?.let { it.alongM - done } ?: 0.0,
+                stops = it.stops + if (newStop) 1 else 0,
             )
+        }
+
+        // A nudge shortly before each turn.
+        val turn = nextTurn
+        if (turn != null && turn !== lastCued && turn.alongM - done < 120.0 && !offRoute) {
+            lastCued = turn
+            if (offRouteAlertOn) buzz(longArrayOf(0, 90, 90, 90))
+            if (ttsReady) {
+                val m = (((turn.alongM - done) / 10).toInt() * 10).coerceAtLeast(10)
+                runCatching { tts?.speak("${turn.label} in $m metres", TextToSpeech.QUEUE_ADD, null, "turn") }
+            }
         }
 
         // Spoken update at every whole kilometre, if switched on.
@@ -400,11 +432,21 @@ class TrackingService : Service(), LocationListener {
             private set
         @Volatile private var guideCum: DoubleArray? = null
 
+        @Volatile private var guideTurns: List<Turn> = emptyList()
+        /** Traffic signals near the followed route; a stop next to one pauses the clock sooner. */
+        @Volatile var signals: List<Pt> = emptyList()
+
         fun setGuide(pts: List<Pt>?) {
-            guideCum = pts?.let { Geo.cumulative(it) }
+            val cum = pts?.let { Geo.cumulative(it) }
+            guideTurns = if (pts != null && cum != null) Geo.turns(pts, cum) else emptyList()
+            if (pts == null) signals = emptyList()
+            guideCum = cum
             guide = pts
             state.update {
-                it.copy(guideOffM = null, guideDoneM = 0.0, offRoute = false, guideTotalM = guideCum?.lastOrNull() ?: 0.0)
+                it.copy(
+                    guideOffM = null, guideDoneM = 0.0, offRoute = false, nextTurn = null,
+                    guideTotalM = guideCum?.lastOrNull() ?: 0.0,
+                )
             }
         }
 

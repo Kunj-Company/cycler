@@ -20,7 +20,11 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Air
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Fullscreen
 import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material.icons.outlined.Terrain
+import androidx.compose.material.icons.outlined.TurnLeft
+import androidx.compose.material.icons.outlined.TurnRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -136,8 +140,19 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
             }
         }
     }
-    val dots = remember(here, guide) {
+    val climbs = remember(guide) {
+        guide?.let { Geo.climbs(it.pts, Geo.cumulative(it.pts)) } ?: emptyList()
+    }
+    // Inside a climb, or the next one starting within a kilometre.
+    val climbNote = if (!active) null else climbs.firstOrNull { st.guideDoneM < it.endM && it.startM - st.guideDoneM < 1000.0 }?.let { c ->
+        if (st.guideDoneM >= c.startM) "Climbing · ${Fmt.km(c.endM - st.guideDoneM)} to the top"
+        else "Climb in ${Fmt.km(c.startM - st.guideDoneM)} · ${Fmt.km(c.lengthM)} at ${c.gradePct.toInt()}%"
+    }
+    var big by remember { mutableStateOf(false) }
+    val signals = vm.guideSignals
+    val dots = remember(here, guide, signals) {
         buildList {
+            signals.forEach { add(MapDot(it, "#E0A030", 4f)) }
             guide?.pts?.lastOrNull()?.let { add(MapDot(it, "#D4403A", 6f)) }
             here?.let { add(MapDot(it, COLOR_ME, 8f)) }
         }
@@ -172,6 +187,30 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                if (active && st.nextTurn != null && !st.offRoute) {
+                    Spacer(Modifier.height(8.dp))
+                    MapChip {
+                        Icon(
+                            if (st.nextTurnLeft) Icons.Outlined.TurnLeft else Icons.Outlined.TurnRight, null,
+                            Modifier.size(22.dp), tint = Cy.colors.accent,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(st.nextTurn ?: "", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "in ${Fmt.km(st.nextTurnM)}", style = MaterialTheme.typography.bodyMedium.tabular,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (climbNote != null) {
+                    Spacer(Modifier.height(8.dp))
+                    MapChip {
+                        Icon(Icons.Outlined.Terrain, null, Modifier.size(18.dp), tint = Cy.colors.warn)
+                        Spacer(Modifier.width(8.dp))
+                        Text(climbNote, style = MaterialTheme.typography.labelLarge.tabular)
+                    }
+                }
             }
         }
 
@@ -194,11 +233,15 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
                             TrackingService.send(ctx, TrackingService.ACTION_START)
                         }
                     } else {
-                        RecordingPanel(vm, st, now, onFinish = { showFinish = true })
+                        RecordingPanel(vm, st, now, onBig = { big = true }, onFinish = { showFinish = true })
                     }
                 }
             }
         }
+    }
+
+    if (big && active) {
+        BigNumbers(vm, st, now, climbNote) { big = false }
     }
 
     if (showFinish) {
@@ -287,7 +330,7 @@ private fun IdlePanel(
 }
 
 @Composable
-private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onFinish: () -> Unit) {
+private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onBig: () -> Unit, onFinish: () -> Unit) {
     val ctx = LocalContext.current
     val paused = st.status == TrackStatus.PAUSED
     val avg = if (st.movingMs > 0) st.distanceM / (st.movingMs / 1000.0) else 0.0
@@ -315,6 +358,12 @@ private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onFinish: () -
         Text(
             "Elapsed ${Fmt.clock(st.elapsedMs(now))}", style = MaterialTheme.typography.labelMedium.tabular,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(10.dp))
+        Icon(
+            Icons.Outlined.Fullscreen, "Big numbers",
+            Modifier.size(24.dp).clip(Radius).clickable(onClick = onBig),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 
@@ -376,5 +425,74 @@ private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onFinish: () -
             )
         }
         CyButton("Finish", onFinish, Modifier.weight(1f), Btn.PRIMARY, Icons.Filled.Stop, height = 52.dp)
+    }
+}
+
+/** Three huge numbers, readable at a glance on the handlebar. Tap anywhere to go back. */
+@Composable
+private fun BigNumbers(vm: MainVm, st: TrackState, now: Long, climbNote: String?, onClose: () -> Unit) {
+    androidx.compose.material3.Surface(
+        Modifier.fillMaxSize().clickable(onClick = onClose), color = MaterialTheme.colorScheme.background,
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            if (st.offRoute) {
+                Text("Off route · ${st.guideOffM?.toInt() ?: 0} m", style = MaterialTheme.typography.headlineMedium, color = Cy.colors.danger)
+            } else if (st.nextTurn != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (st.nextTurnLeft) Icons.Outlined.TurnLeft else Icons.Outlined.TurnRight, null,
+                        Modifier.size(44.dp), tint = Cy.colors.accent,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text("${st.nextTurn} · ${Fmt.km(st.nextTurnM)}", style = MaterialTheme.typography.headlineMedium)
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StatusDot(if (st.autoPaused || st.status == TrackStatus.PAUSED) Cy.colors.warn else Cy.colors.danger, 12.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        when {
+                            st.status == TrackStatus.PAUSED -> "Paused"
+                            st.autoPaused -> "Auto-paused"
+                            else -> "Recording"
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    Fmt.kmh(st.speedMs.toDouble()),
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontSize = androidx.compose.ui.unit.TextUnit(128f, androidx.compose.ui.unit.TextUnitType.Sp),
+                        lineHeight = androidx.compose.ui.unit.TextUnit(132f, androidx.compose.ui.unit.TextUnitType.Sp),
+                    ),
+                )
+                Text("km/h", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(Fmt.kmNumber(st.distanceM), style = MaterialTheme.typography.displayLarge)
+                    Text("km", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        Fmt.clock(if (vm.autoPause) st.movingMs else st.elapsedMs(now)),
+                        style = MaterialTheme.typography.displayLarge,
+                    )
+                    Text(
+                        if (vm.autoPause) "moving" else "time", style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Text(
+                climbNote ?: "Tap anywhere to go back", style = MaterialTheme.typography.bodyLarge,
+                color = if (climbNote != null) Cy.colors.warn else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

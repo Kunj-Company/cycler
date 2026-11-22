@@ -27,11 +27,15 @@ class RouteStore private constructor(ctx: Context) {
         val list = dir.listFiles { f -> f.name.endsWith(".meta.json") }.orEmpty().mapNotNull { f ->
             runCatching {
                 var m = metaFromJson(JSONObject(f.readText()))
-                if (m.thumb.isEmpty()) {
-                    // Routes saved by an older version: add the outline once.
+                if (m.thumb.isEmpty() || m.v < FORMAT) {
+                    // Saved by an older version: fill in the outline and best efforts once.
                     val pts = readPoints(m.id)
                     if (pts.size >= 2) {
-                        m = m.copy(thumb = Geo.simplify(pts))
+                        m = m.copy(
+                            thumb = Geo.simplify(pts),
+                            bests = if (m.type == RouteType.RECORDED) Geo.bestEfforts(pts) else emptyMap(),
+                            v = FORMAT,
+                        )
                         writeSafely(f, metaToJson(m).toString())
                     }
                 }
@@ -49,12 +53,14 @@ class RouteStore private constructor(ctx: Context) {
         createdAt: Long = System.currentTimeMillis(),
         maxSpeedMs: Double = 0.0,
         elapsedS: Long = 0,
+        stops: Int = 0,
     ): String {
         val id = UUID.randomUUID().toString()
         val meta = RouteMeta(
             id, name.ifBlank { "Untitled" }, type, createdAt, distanceM, ascentM, durationS,
             pts.firstOrNull()?.lat ?: 0.0, pts.firstOrNull()?.lon ?: 0.0,
-            maxSpeedMs, elapsedS, Geo.simplify(pts),
+            maxSpeedMs, elapsedS, Geo.simplify(pts), stops,
+            if (type == RouteType.RECORDED) Geo.bestEfforts(pts) else emptyMap(), FORMAT,
         )
         val arr = JSONArray()
         for (p in pts) {
@@ -100,7 +106,34 @@ class RouteStore private constructor(ctx: Context) {
     fun delete(id: String) {
         File(dir, "$id.meta.json").delete()
         File(dir, "$id.pts.json").delete()
+        mediaDir(id).deleteRecursively()
         reload()
+    }
+
+    // Photos and videos attached to a ride live in media/<ride id>/.
+    private val mediaRoot = File(dir.parentFile, "media")
+    private val _mediaTick = MutableStateFlow(0)
+    /** Changes whenever any ride's media changes, so lists can refresh. */
+    val mediaTick: StateFlow<Int> = _mediaTick
+
+    fun mediaDir(id: String) = File(mediaRoot, id)
+
+    fun media(id: String): List<File> =
+        mediaDir(id).listFiles()?.filter { it.isFile && !it.name.endsWith(".tmp") }?.sortedBy { it.name } ?: emptyList()
+
+    /** Copy a picked photo or video into the ride's folder. */
+    fun addMedia(id: String, resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean = runCatching {
+        val video = resolver.getType(uri)?.startsWith("video") == true
+        val d = mediaDir(id).apply { mkdirs() }
+        val target = File(d, "${System.currentTimeMillis()}_${(0..999).random()}." + if (video) "mp4" else "jpg")
+        resolver.openInputStream(uri)!!.use { input -> target.outputStream().use { input.copyTo(it) } }
+        _mediaTick.value++
+        true
+    }.getOrDefault(false)
+
+    fun removeMedia(file: File) {
+        file.delete()
+        _mediaTick.value++
     }
 
     /** If the app died mid-ride, turn the leftover points into a saved ride. */
@@ -146,6 +179,8 @@ class RouteStore private constructor(ctx: Context) {
         .put("startLat", m.startLat).put("startLon", m.startLon)
         .put("maxSpeedMs", m.maxSpeedMs).put("elapsedS", m.elapsedS)
         .put("thumb", JSONArray().also { arr -> m.thumb.forEach { arr.put(JSONArray().put(it.lat).put(it.lon)) } })
+        .put("stops", m.stops).put("v", m.v)
+        .put("bests", JSONObject().also { o -> m.bests.forEach { (k, s) -> o.put(k.toString(), s) } })
 
     private fun metaFromJson(o: JSONObject) = RouteMeta(
         o.getString("id"), o.getString("name"), RouteType.valueOf(o.getString("type")),
@@ -157,9 +192,15 @@ class RouteStore private constructor(ctx: Context) {
                 (0 until arr.length()).map { i -> arr.getJSONArray(i).let { Pt(it.getDouble(0), it.getDouble(1)) } }
             }
         }.getOrNull() ?: emptyList(),
+        o.optInt("stops", 0),
+        runCatching {
+            o.optJSONObject("bests")?.let { b -> b.keys().asSequence().associate { it.toInt() to b.getLong(it) } }
+        }.getOrNull() ?: emptyMap(),
+        o.optInt("v", 0),
     )
 
     companion object {
+        private const val FORMAT = 2
         @Volatile private var inst: RouteStore? = null
         /** For tests only: forget the shared instance so the next get() starts clean. */
         internal fun resetForTests() { inst = null }
@@ -197,9 +238,31 @@ class Prefs(ctx: Context) {
     var weeklyGoalKm: Int
         get() = sp.getInt("weeklyGoalKm", 50)
         set(v) = sp.edit().putInt("weeklyGoalKm", v).apply()
+    /** Bike parts being tracked for wear: name, service interval in km, and when last reset. */
+    var care: List<CareItem>
+        get() {
+            val raw = sp.getString("care", null) ?: return CareItem.defaults()
+            return raw.split(';').mapNotNull { row ->
+                val p = row.split('|')
+                val km = p.getOrNull(1)?.toIntOrNull()
+                val at = p.getOrNull(2)?.toLongOrNull()
+                if (p[0].isBlank() || km == null || at == null) null else CareItem(p[0], km, at)
+            }
+        }
+        set(v) = sp.edit().putString("care", v.joinToString(";") { "${it.name}|${it.everyKm}|${it.resetAt}" }).apply()
     var lastLoc: Pt?
         get() = if (sp.contains("lastLat")) Pt(sp.getFloat("lastLat", 0f).toDouble(), sp.getFloat("lastLon", 0f).toDouble()) else null
         set(v) {
             if (v != null) sp.edit().putFloat("lastLat", v.lat.toFloat()).putFloat("lastLon", v.lon.toFloat()).apply()
         }
+}
+
+/** A part of the bike that needs attention every [everyKm] kilometres. */
+data class CareItem(val name: String, val everyKm: Int, val resetAt: Long) {
+    companion object {
+        fun defaults() = listOf(
+            CareItem("Lube the chain", 300, 0), CareItem("Check tyres and brake pads", 1000, 0),
+            CareItem("Full service", 2500, 0), CareItem("Replace chain", 4000, 0),
+        )
+    }
 }

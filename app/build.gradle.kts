@@ -12,8 +12,8 @@ android {
         applicationId = "com.cycler.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4"
+        versionCode = 5
+        versionName = "0.5"
         // Only the 64-bit ARM build of the map engine (real phones, Apple-silicon emulators).
         // Remove this line if you need other CPU types.
         ndk { abiFilters += "arm64-v8a" }

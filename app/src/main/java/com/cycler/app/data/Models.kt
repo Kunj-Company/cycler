@@ -28,6 +28,12 @@ data class RouteMeta(
     val elapsedS: Long = 0,
     /** A few dozen points for drawing a small outline of the route. */
     val thumb: List<Pt> = emptyList(),
+    /** How many times the rider came to a stop during a recorded ride. */
+    val stops: Int = 0,
+    /** Fastest time in seconds over set distances within this ride, keyed by kilometres. */
+    val bests: Map<Int, Long> = emptyMap(),
+    /** Storage format version, used to fill in fields added by later app versions. */
+    val v: Int = 0,
 ) {
     val difficulty: Difficulty get() = Difficulty.of(distanceM, ascentM)
 }
@@ -51,7 +57,113 @@ enum class Difficulty(val label: String) {
 
 data class Route(val meta: RouteMeta, val pts: List<Pt>)
 
+/** A bend sharp enough to call out while following a route. Negative angles turn left. */
+class Turn(val alongM: Double, val angle: Double) {
+    val left: Boolean get() = angle < 0
+    val label: String
+        get() = when {
+            kotlin.math.abs(angle) >= 150 -> "U-turn"
+            kotlin.math.abs(angle) >= 100 -> if (left) "Sharp left" else "Sharp right"
+            else -> if (left) "Turn left" else "Turn right"
+        }
+}
+
+/** A sustained uphill stretch of a route. */
+class Climb(val startM: Double, val endM: Double, val gainM: Double) {
+    val lengthM: Double get() = endM - startM
+    val gradePct: Double get() = if (lengthM > 0) gainM / lengthM * 100 else 0.0
+}
+
 object Geo {
+    /** Distances, in kilometres, for which best efforts are kept. */
+    val EFFORTS = listOf(1, 5, 10, 20, 40)
+
+    /**
+     * Turns along a route, found from its shape: the direction 25 m before a point
+     * against the direction 25 m after it. Bends of 50 degrees or more count.
+     */
+    fun turns(route: List<Pt>, cum: DoubleArray): List<Turn> {
+        val out = ArrayList<Turn>()
+        val n = route.size
+        if (n < 3) return out
+        var back = 0
+        var fwd = 2
+        for (i in 1 until n - 1) {
+            while (back < i - 1 && cum[i] - cum[back + 1] >= 25.0) back++
+            if (fwd < i + 1) fwd = i + 1
+            while (fwd < n - 1 && cum[fwd] - cum[i] < 25.0) fwd++
+            if (cum[i] - cum[back] < 8.0 || cum[fwd] - cum[i] < 8.0) continue
+            val d = ((bearing(route[i], route[fwd]) - bearing(route[back], route[i]) + 540.0) % 360.0) - 180.0
+            if (kotlin.math.abs(d) < 50.0) continue
+            val last = out.lastOrNull()
+            if (last != null && cum[i] - last.alongM < 40.0) {
+                // The same corner seen from the next point: keep the sharper reading.
+                if (kotlin.math.abs(d) > kotlin.math.abs(last.angle)) out[out.size - 1] = Turn(cum[i], d)
+            } else out.add(Turn(cum[i], d))
+        }
+        return out
+    }
+
+    /** Climbs of at least 20 m gain over 300 m or more, averaging 2% or steeper. */
+    fun climbs(route: List<Pt>, cum: DoubleArray): List<Climb> {
+        val total = cum.lastOrNull() ?: return emptyList()
+        if (total < 300.0 || route.any { it.ele.isNaN() }) return emptyList()
+        val step = 50.0
+        val m = (total / step).toInt() + 1
+        val raw = DoubleArray(m)
+        var j = 0
+        for (k in 0 until m) {
+            val d = k * step
+            while (j < route.size - 2 && cum[j + 1] < d) j++
+            val span = (cum[j + 1] - cum[j]).coerceAtLeast(1e-6)
+            val t = ((d - cum[j]) / span).coerceIn(0.0, 1.0)
+            raw[k] = route[j].ele + t * (route[j + 1].ele - route[j].ele)
+        }
+        val e = DoubleArray(m) { k ->
+            var s = 0.0
+            var c = 0
+            for (q in maxOf(0, k - 2)..minOf(m - 1, k + 2)) { s += raw[q]; c++ }
+            s / c
+        }
+        val out = ArrayList<Climb>()
+        fun record(lo: Int, hi: Int) {
+            val gain = e[hi] - e[lo]
+            val len = (hi - lo) * step
+            if (gain >= 20.0 && len >= 300.0 && gain / len >= 0.02) out.add(Climb(lo * step, hi * step, gain))
+        }
+        var lo = 0
+        var hi = 0
+        for (k in 1 until m) {
+            if (hi == lo && e[k] <= e[lo]) { lo = k; hi = k }
+            else if (e[k] > e[hi]) hi = k
+            else if (e[hi] - e[k] > 10.0) { record(lo, hi); lo = k; hi = k }
+        }
+        record(lo, hi)
+        return out
+    }
+
+    /** Fastest time, in seconds, to cover [targetM] anywhere within a timed ride. Null if the ride is shorter. */
+    fun bestEffort(pts: List<Pt>, cum: DoubleArray, targetM: Double): Long? {
+        if (pts.size < 2 || pts.first().t <= 0 || cum.last() < targetM) return null
+        var best = Long.MAX_VALUE
+        var i = 0
+        for (j in 1 until pts.size) {
+            if (cum[j] - cum[i] < targetM) continue
+            while (cum[j] - cum[i + 1] >= targetM) i++
+            val dt = pts[j].t - pts[i].t
+            if (dt in 1 until best) best = dt
+        }
+        return if (best == Long.MAX_VALUE) null else best / 1000
+    }
+
+    fun bestEfforts(pts: List<Pt>): Map<Int, Long> {
+        if (pts.size < 2 || pts.first().t <= 0) return emptyMap()
+        val cum = cumulative(pts)
+        val out = LinkedHashMap<Int, Long>()
+        for (km in EFFORTS) bestEffort(pts, cum, km * 1000.0)?.let { if (it > 0) out[km] = it }
+        return out
+    }
+
     private const val R = 6371000.0
     private fun rad(d: Double) = d * PI / 180.0
     private fun deg(r: Double) = r * 180.0 / PI

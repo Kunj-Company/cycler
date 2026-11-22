@@ -58,6 +58,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.cycler.app.data.CareItem
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Prefs
 import com.cycler.app.data.Pt
@@ -66,6 +67,7 @@ import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteStore
 import com.cycler.app.data.RouteType
 import com.cycler.app.net.BRouter
+import com.cycler.app.net.Overpass
 import com.cycler.app.net.Weather
 import com.cycler.app.track.TrackStatus
 import com.cycler.app.track.TrackingService
@@ -74,6 +76,8 @@ import com.cycler.app.ui.ActivityScreen
 import com.cycler.app.ui.Cy
 import com.cycler.app.ui.CyclerTheme
 import com.cycler.app.ui.Hairline
+import com.cycler.app.ui.HeatmapScreen
+import com.cycler.app.ui.ShareScreen
 import com.cycler.app.ui.PlanScreen
 import com.cycler.app.ui.RideScreen
 import com.cycler.app.ui.RouteDetailScreen
@@ -146,7 +150,29 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** Follow [route] on the Ride screen (null stops following). */
     fun follow(route: Route?) {
         guide = route
+        guideSignals = emptyList()
         TrackingService.setGuide(route?.pts)
+        if (route != null) viewModelScope.launch {
+            val found = withContext(Dispatchers.IO) { runCatching { Overpass.signalsAlong(route.pts) }.getOrNull() }
+            if (found != null && guide === route) {
+                guideSignals = found
+                TrackingService.signals = found
+            }
+        }
+    }
+
+    /** Traffic signals along the route being followed, once looked up. */
+    var guideSignals by mutableStateOf(listOf<Pt>())
+        private set
+
+    /** Which full-screen page is open on top of the tabs, if any. */
+    var shareId by mutableStateOf<String?>(null)
+    var showHeatmap by mutableStateOf(false)
+    var care by mutableStateOf(prefs.care)
+
+    fun saveCare(items: List<CareItem>) {
+        care = items
+        prefs.care = items
     }
 
     /** Fetch the weather, at most every 15 minutes unless the rider has moved far. */
@@ -452,6 +478,17 @@ fun App(vm: MainVm) {
         }
     }
 
+    val share = vm.shareId
+    if (share != null) {
+        BackHandler { vm.shareId = null }
+        ShareScreen(vm, share)
+        return
+    }
+    if (vm.showHeatmap) {
+        BackHandler { vm.showHeatmap = false }
+        HeatmapScreen(vm)
+        return
+    }
     val detail = vm.detailId
     if (detail != null) {
         BackHandler { vm.detailId = null }

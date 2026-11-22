@@ -3,7 +3,20 @@ package com.cycler.app.ui
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.IosShare
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.cycler.app.net.Overpass
+import com.cycler.app.share.loadShareImage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -222,11 +235,29 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
 fun RouteDetailScreen(vm: MainVm, id: String) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val inspection = androidx.compose.ui.platform.LocalInspectionMode.current
     val metas by vm.store.metas.collectAsState()
     val meta = metas.firstOrNull { it.id == id }
     val route by produceState<Route?>(null, id) { value = withContext(Dispatchers.IO) { vm.store.load(id) } }
     var rename by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var removeMedia by remember { mutableStateOf<java.io.File?>(null) }
+    val mediaTick by vm.store.mediaTick.collectAsState()
+    val media = remember(id, mediaTick) { vm.store.media(id) }
+    val thumbs by produceState(emptyList<Pair<java.io.File, android.graphics.Bitmap>>(), media) {
+        value = withContext(Dispatchers.IO) { media.mapNotNull { f -> loadShareImage(f, 200)?.let { f to it } } }
+    }
+    val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(8)) { uris ->
+        if (uris.isNotEmpty()) scope.launch {
+            withContext(Dispatchers.IO) { uris.forEach { vm.store.addMedia(id, ctx.contentResolver, it) } }
+        }
+    }
+    // Traffic signals along the route, looked up once; null while loading or if the lookup fails.
+    val signals by produceState<List<Pt>?>(null, route) {
+        val r = route
+        value = if (r == null || inspection) null
+        else withContext(Dispatchers.IO) { runCatching { Overpass.signalsAlong(r.pts) }.getOrNull() }
+    }
 
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/gpx+xml")) { uri ->
         val r = route
@@ -249,6 +280,9 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                     meta?.name ?: "Route", style = MaterialTheme.typography.titleLarge,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
+                IconButton({
+                    meta?.let { export.launch(it.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "route" } + ".gpx") }
+                }) { Icon(Icons.Outlined.FileDownload, "Export GPX", Modifier.size(22.dp)) }
                 IconButton({ rename = true }) { Icon(Icons.Outlined.Edit, "Rename", Modifier.size(20.dp)) }
                 IconButton({ confirmDelete = true }) { Icon(Icons.Outlined.DeleteOutline, "Delete", Modifier.size(22.dp)) }
             }
@@ -257,9 +291,10 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
             val lines = remember(r) {
                 listOfNotNull(r?.let { MapLine(it.pts, if (it.meta.type == RouteType.RECORDED) COLOR_TRACK else COLOR_ROUTE, 5f) })
             }
-            val dots = remember(r) {
+            val dots = remember(r, signals) {
                 if (r == null || r.pts.isEmpty()) emptyList()
-                else listOf(MapDot(r.pts.first(), "#2F7D4F", 7f), MapDot(r.pts.last(), "#D4403A", 7f))
+                else (signals ?: emptyList()).map { MapDot(it, "#E0A030", 4f) } +
+                    listOf(MapDot(r.pts.first(), "#2F7D4F", 7f), MapDot(r.pts.last(), "#D4403A", 7f))
             }
             val camera = remember(r) { r?.let { CameraCmd(it.pts) } }
             CyclerMap(
@@ -269,8 +304,8 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
             if (meta != null) {
                 Sheet {
                     Column(
-                        Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())
-                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        Modifier.heightIn(max = 370.dp).verticalScroll(rememberScrollState())
+                            .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp),
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Tag(if (recorded) "Ride" else "Planned")
@@ -289,11 +324,46 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                                 Metric("Avg", Fmt.kmh(meta.distanceM / meta.durationS), unit = "km/h")
                             }
                         }
-                        if (recorded && (meta.maxSpeedMs > 0 || meta.elapsedS > 0)) {
-                            Spacer(Modifier.height(12.dp))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-                                if (meta.maxSpeedMs > 0) Metric("Max", Fmt.kmh(meta.maxSpeedMs), unit = "km/h")
-                                if (meta.elapsedS > 0) Metric("Elapsed", Fmt.dur(meta.elapsedS))
+                        Spacer(Modifier.height(12.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(26.dp)) {
+                            if (recorded && meta.maxSpeedMs > 0) Metric("Max", Fmt.kmh(meta.maxSpeedMs), unit = "km/h")
+                            if (recorded && meta.elapsedS > meta.durationS) {
+                                Metric("Stopped", Fmt.dur(meta.elapsedS - meta.durationS))
+                            }
+                            if (recorded && meta.stops > 0) Metric("Stops", "${meta.stops}")
+                            Metric("Signals", signals?.size?.toString() ?: "…")
+                        }
+
+                        // Photos and videos from the ride.
+                        Spacer(Modifier.height(16.dp))
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            thumbs.forEach { (file, bmp) ->
+                                Box(Modifier.size(68.dp).clip(Radius).clickable { removeMedia = file }) {
+                                    Image(
+                                        bmp.asImageBitmap(), "Ride photo", contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                    if (file.name.endsWith(".mp4")) {
+                                        Icon(
+                                            Icons.Outlined.PlayArrow, "Video", tint = androidx.compose.ui.graphics.Color.White,
+                                            modifier = Modifier.align(Alignment.Center).size(28.dp),
+                                        )
+                                    }
+                                }
+                            }
+                            Row(
+                                Modifier.height(68.dp).clip(Radius).border(1.dp, Cy.colors.border, Radius)
+                                    .clickable {
+                                        pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                                    }.padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Outlined.AddPhotoAlternate, null, Modifier.size(20.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (media.isEmpty()) "Add photos or videos" else "Add", style = MaterialTheme.typography.labelLarge)
                             }
                         }
                         if (r != null) {
@@ -316,7 +386,10 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                                 }
                             }
                         }
-                        Spacer(Modifier.height(16.dp))
+                    }
+                    // The two main actions stay put while the details above scroll.
+                    Hairline()
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             CyButton(
                                 if (recorded) "Ride again" else "Ride this route",
@@ -324,9 +397,8 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                                 Modifier.weight(1f), icon = Icons.Outlined.PlayArrow, enabled = r != null,
                             )
                             CyButton(
-                                "Export GPX",
-                                { export.launch(meta.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "route" } + ".gpx") },
-                                Modifier.weight(1f), Btn.SECONDARY, enabled = r != null,
+                                "Share", { vm.shareId = id },
+                                Modifier.weight(1f), Btn.SECONDARY, Icons.Outlined.IosShare, enabled = r != null,
                             )
                         }
                     }
@@ -335,6 +407,20 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
         }
     }
 
+    removeMedia?.let { f ->
+        AlertDialog(
+            onDismissRequest = { removeMedia = null },
+            shape = RadiusLarge,
+            title = { Text("Remove from this ride?", style = MaterialTheme.typography.titleLarge) },
+            text = { Text("The copy kept with this ride is removed. Your gallery is not touched.") },
+            confirmButton = {
+                TextButton({ vm.store.removeMedia(f); removeMedia = null }) { Text("Remove", color = Cy.colors.danger) }
+            },
+            dismissButton = {
+                TextButton({ removeMedia = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
+        )
+    }
     if (rename && meta != null) {
         NameDialog("Rename", meta.name, "Save", { rename = false; vm.store.rename(id, it) }, { rename = false })
     }
