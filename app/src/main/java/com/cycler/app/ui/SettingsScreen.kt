@@ -104,7 +104,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
     ) { uri ->
         if (uri != null) scope.launch {
             val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { vm.store.exportAll(it) } }.getOrNull()
+                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { vm.store.exportAll(it, mapOf("care.json" to com.cycler.app.data.CareItem.encode(vm.care))) } }.getOrNull()
             }
             toast(if (n != null) "Backed up $n rides and routes" else "Couldn't write the backup")
         }
@@ -113,9 +113,12 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri != null) scope.launch {
+            var pendingCare: String? = null
             val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openInputStream(uri)!!.use { vm.store.importAll(it) } }.getOrNull()
+                runCatching { ctx.contentResolver.openInputStream(uri)!!.use { vm.store.importAll(it) { name, text -> if (name == "care.json") pendingCare = text } } }.getOrNull()
             }
+            // The bike care list in the backup replaces the one here.
+            pendingCare?.let { vm.saveCare(com.cycler.app.data.CareItem.parse(it)) }
             toast(if (n != null && n > 0) "Restored $n files from the backup" else "That file isn't a Cycler backup")
         }
     }

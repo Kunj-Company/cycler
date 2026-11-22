@@ -259,12 +259,14 @@ class RouteStore private constructor(ctx: Context) {
      * Everything the app holds, as one zip: the ride and route files, attached photos and
      * videos, and a GPX copy of every route that other apps can open.
      */
-    fun exportAll(out: java.io.OutputStream): Int {
+    fun exportAll(out: java.io.OutputStream, extras: Map<String, String> = emptyMap()): Int {
         var count = 0
         java.util.zip.ZipOutputStream(out).use { zip ->
             fun add(name: String, bytes: ByteArray) {
                 zip.putNextEntry(java.util.zip.ZipEntry(name)); zip.write(bytes); zip.closeEntry()
             }
+            // Small things kept outside the ride files, such as the bike care list.
+            extras.forEach { (name, text) -> add("settings/$name", text.toByteArray()) }
             dir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.forEach { add("routes/${it.name}", it.readBytes()) }
             segDir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.forEach { add("segments/${it.name}", it.readBytes()) }
             mediaRoot.listFiles()?.filter { it.isDirectory }?.forEach { d ->
@@ -286,13 +288,20 @@ class RouteStore private constructor(ctx: Context) {
     }
 
     /** Bring back rides from a backup zip made by [exportAll]. Existing rides are kept. Returns how many files were restored. */
-    fun importAll(input: java.io.InputStream): Int {
+    fun importAll(input: java.io.InputStream, onExtra: (name: String, text: String) -> Unit = { _, _ -> }): Int {
         val root = dir.parentFile ?: return 0
         val base = root.canonicalPath + File.separator
         var n = 0
         java.util.zip.ZipInputStream(input).use { zip ->
             while (true) {
                 val e = zip.nextEntry ?: break
+                if (!e.isDirectory && e.name.startsWith("settings/") && e.size < 1_000_000) {
+                    val text = zip.readBytes().toString(Charsets.UTF_8)
+                    runCatching { onExtra(e.name.removePrefix("settings/"), text) }
+                    n++
+                    zip.closeEntry()
+                    continue
+                }
                 val wanted = e.name.startsWith("routes/") || e.name.startsWith("media/") || e.name.startsWith("segments/")
                 val target = File(root, e.name)
                 // Only files that land inside the app's own folder are accepted.
