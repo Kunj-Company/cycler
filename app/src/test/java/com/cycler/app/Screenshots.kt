@@ -164,6 +164,36 @@ class Screenshots {
         org.junit.Assert.assertEquals(before, vm.store.metas.value.size)
         org.junit.Assert.assertNotNull(vm.store.load(keep.id))
     }
+    private fun workoutRide() {
+        recording()
+        vm.workout = com.cycler.app.data.Workout.presets[0]
+        TrackingService.state.value = TrackingService.state.value.copy(
+            laps = listOf(com.cycler.app.data.LapMark(5000.0, 850_000, 900_000), com.cycler.app.data.LapMark(10_000.0, 1_700_000, 1_830_000)),
+            workoutStep = 3, workoutLeftS = 151,
+        )
+    }
+    @Test fun ride_workout_and_laps() { workoutRide(); shell("03b_ride_workout_laps", Tab.RIDE) }
+    @Test fun big_numbers() {
+        workoutRide()
+        shot("03c_big_numbers", dark = true) {
+            com.cycler.app.ui.BigNumbers(vm, TrackingService.state.value, System.currentTimeMillis(), 184.0, null, vm.workout) {}
+        }
+    }
+    @Test fun ride_screen_editor() = shot("19_ride_screen_editor") { com.cycler.app.ui.RideScreenEditor(vm) }
+    @Test fun offline_maps() = shot("20_offline_maps") { com.cycler.app.ui.OfflineScreen(vm, home) }
+    private fun seedSegment(): String {
+        val ride = vm.store.load(vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id)!!
+        val id = vm.store.addSegment("Foothills climb", ride.pts.subList(30, 70))
+        vm.store.addSegment("Lake straight", ride.pts.subList(80, 100))
+        vm.store.refreshSegments()
+        return id
+    }
+    @Test fun segments_list() { seedSegment(); shot("21_segments") { com.cycler.app.ui.SegmentsScreen(vm) } }
+    @Test fun segment_detail() { val id = seedSegment(); shot("22_segment_detail") { com.cycler.app.ui.SegmentDetailScreen(vm, id) } }
+    @Test fun segment_create() {
+        val id = vm.store.metas.value.first { it.name.startsWith("Nandi foothills") }.id
+        shot("23_segment_create") { com.cycler.app.ui.SegmentCreateScreen(vm, id) }
+    }
     @Test fun heatmap() = shot("17_all_rides") { com.cycler.app.ui.HeatmapScreen(vm) }
     @Test fun ride_recording_dark() { recording(); shell("05_ride_recording_dark", Tab.RIDE, dark = true) }
     @Test fun plan_empty() = shell("06_plan_empty", Tab.PLAN)
