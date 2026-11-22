@@ -54,6 +54,7 @@ class RouteStore private constructor(ctx: Context) {
         maxSpeedMs: Double = 0.0,
         elapsedS: Long = 0,
         stops: Int = 0,
+        laps: List<LapMark> = emptyList(),
     ): String {
         val id = UUID.randomUUID().toString()
         val meta = RouteMeta(
@@ -61,6 +62,7 @@ class RouteStore private constructor(ctx: Context) {
             pts.firstOrNull()?.lat ?: 0.0, pts.firstOrNull()?.lon ?: 0.0,
             maxSpeedMs, elapsedS, Geo.simplify(pts), stops,
             if (type == RouteType.RECORDED) Geo.bestEfforts(pts) else emptyMap(), FORMAT,
+            laps = laps,
         )
         val arr = JSONArray()
         for (p in pts) {
@@ -118,8 +120,107 @@ class RouteStore private constructor(ctx: Context) {
     fun delete(id: String) {
         File(dir, "$id.meta.json").delete()
         File(dir, "$id.pts.json").delete()
+        File(dir, "$id.hr.json").delete()
         mediaDir(id).deleteRecursively()
         reload()
+    }
+
+    // --- Heart rate for a ride, from Health Connect: [epoch millis, bpm] pairs in <id>.hr.json ---
+
+    fun heartRate(id: String): List<Pair<Long, Int>> = runCatching {
+        val a = JSONArray(File(dir, "$id.hr.json").readText())
+        (0 until a.length()).map { i -> a.getJSONArray(i).let { it.getLong(0) to it.getInt(1) } }
+    }.getOrDefault(emptyList())
+
+    @Synchronized
+    fun saveHeartRate(id: String, samples: List<Pair<Long, Int>>) {
+        val meta = _metas.value.firstOrNull { it.id == id } ?: return
+        if (samples.isEmpty()) return
+        val a = JSONArray()
+        samples.forEach { a.put(JSONArray().put(it.first).put(it.second)) }
+        writeSafely(File(dir, "$id.hr.json"), a.toString())
+        val updated = meta.copy(avgHr = samples.map { it.second }.average().toInt(), maxHr = samples.maxOf { it.second })
+        writeSafely(File(dir, "$id.meta.json"), metaToJson(updated).toString())
+        reload()
+    }
+
+    // --- Segments: one JSON file each in segments/, holding the road and the efforts found so far ---
+
+    private val segDir = File(dir.parentFile, "segments").apply { mkdirs() }
+    private val _segTick = MutableStateFlow(0)
+    val segTick: StateFlow<Int> = _segTick
+
+    class SegmentFile(val seg: Segment, val efforts: List<Effort>, val checked: Set<String>)
+
+    fun segments(): List<SegmentFile> = segDir.listFiles { f -> f.name.endsWith(".json") }.orEmpty().mapNotNull { f ->
+        runCatching {
+            val o = JSONObject(f.readText())
+            val p = o.getJSONArray("pts")
+            val pts = (0 until p.length()).map { i -> p.getJSONArray(i).let { Pt(it.getDouble(0), it.getDouble(1)) } }
+            val e = o.optJSONArray("efforts") ?: JSONArray()
+            val c = o.optJSONArray("checked") ?: JSONArray()
+            SegmentFile(
+                Segment(o.getString("id"), o.getString("name"), pts, o.getDouble("lengthM"), o.optLong("createdAt")),
+                (0 until e.length()).map { i -> e.getJSONArray(i).let { Effort(it.getString(0), it.getLong(1), it.getLong(2)) } },
+                (0 until c.length()).map { c.getString(it) }.toSet(),
+            )
+        }.getOrNull()
+    }.sortedByDescending { it.seg.createdAt }
+
+    private fun writeSegment(sf: SegmentFile) {
+        val o = JSONObject().put("id", sf.seg.id).put("name", sf.seg.name).put("lengthM", sf.seg.lengthM)
+            .put("createdAt", sf.seg.createdAt)
+            .put("pts", JSONArray().also { a -> sf.seg.pts.forEach { a.put(JSONArray().put(it.lat).put(it.lon)) } })
+            .put("efforts", JSONArray().also { a -> sf.efforts.forEach { a.put(JSONArray().put(it.rideId).put(it.startT).put(it.seconds)) } })
+            .put("checked", JSONArray(sf.checked))
+        writeSafely(File(segDir, "${sf.seg.id}.json"), o.toString())
+    }
+
+    @Synchronized
+    fun addSegment(name: String, pts: List<Pt>): String {
+        val id = UUID.randomUUID().toString()
+        val slim = pts.map { Pt(it.lat, it.lon) }
+        writeSegment(SegmentFile(Segment(id, name.ifBlank { "Segment" }, slim, Geo.length(slim), System.currentTimeMillis()), emptyList(), emptySet()))
+        _segTick.value++
+        return id
+    }
+
+    @Synchronized
+    fun deleteSegment(id: String) {
+        File(segDir, "$id.json").delete()
+        _segTick.value++
+    }
+
+    /**
+     * Look through any rides not yet checked against each segment and record the passes found.
+     * Safe to call often; each ride is only read once per segment. Run it off the main thread.
+     */
+    @Synchronized
+    fun refreshSegments(): List<SegmentFile> {
+        val rides = _metas.value.filter { it.type == RouteType.RECORDED }
+        val ids = rides.map { it.id }.toSet()
+        var changed = false
+        val cache = HashMap<String, List<Pt>>()
+        val out = segments().map { sf ->
+            val todo = rides.filter { it.id !in sf.checked }
+            // Efforts from rides that have since been deleted are dropped.
+            val kept = sf.efforts.filter { it.rideId in ids }
+            if (todo.isEmpty() && kept.size == sf.efforts.size) return@map sf
+            val found = ArrayList(kept)
+            for (m in todo) {
+                val pts = cache.getOrPut(m.id) { readPoints(m.id) }
+                if (pts.size < 2 || pts.first().t <= 0) continue
+                val cum = Geo.cumulative(pts)
+                for ((a, b) in Geo.matchSegment(pts, cum, sf.seg.pts, sf.seg.lengthM)) {
+                    val secs = (pts[b].t - pts[a].t) / 1000
+                    if (secs > 0) found.add(Effort(m.id, pts[a].t, secs))
+                }
+            }
+            changed = true
+            SegmentFile(sf.seg, found, sf.checked.filter { it in ids }.toSet() + todo.map { it.id }).also { writeSegment(it) }
+        }
+        if (changed) _segTick.value++
+        return out
     }
 
     // Photos and videos attached to a ride live in media/<ride id>/.
@@ -159,6 +260,7 @@ class RouteStore private constructor(ctx: Context) {
                 zip.putNextEntry(java.util.zip.ZipEntry(name)); zip.write(bytes); zip.closeEntry()
             }
             dir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.forEach { add("routes/${it.name}", it.readBytes()) }
+            segDir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.forEach { add("segments/${it.name}", it.readBytes()) }
             mediaRoot.listFiles()?.filter { it.isDirectory }?.forEach { d ->
                 d.listFiles()?.filter { it.isFile }?.forEach { f ->
                     zip.putNextEntry(java.util.zip.ZipEntry("media/${d.name}/${f.name}"))
@@ -185,7 +287,7 @@ class RouteStore private constructor(ctx: Context) {
         java.util.zip.ZipInputStream(input).use { zip ->
             while (true) {
                 val e = zip.nextEntry ?: break
-                val wanted = e.name.startsWith("routes/") || e.name.startsWith("media/")
+                val wanted = e.name.startsWith("routes/") || e.name.startsWith("media/") || e.name.startsWith("segments/")
                 val target = File(root, e.name)
                 // Only files that land inside the app's own folder are accepted.
                 if (!e.isDirectory && wanted && target.canonicalPath.startsWith(base)) {
@@ -198,6 +300,7 @@ class RouteStore private constructor(ctx: Context) {
         }
         reload()
         _mediaTick.value++
+        _segTick.value++
         return n
     }
 
@@ -246,6 +349,8 @@ class RouteStore private constructor(ctx: Context) {
         .put("thumb", JSONArray().also { arr -> m.thumb.forEach { arr.put(JSONArray().put(it.lat).put(it.lon)) } })
         .put("stops", m.stops).put("v", m.v)
         .put("notes", m.notes).put("feeling", m.feeling).put("tags", JSONArray(m.tags))
+        .put("avgHr", m.avgHr).put("maxHr", m.maxHr)
+        .put("laps", JSONArray().also { a -> m.laps.forEach { a.put(JSONArray().put(it.distanceM).put(it.movingMs).put(it.elapsedMs)) } })
         .put("bests", JSONObject().also { o -> m.bests.forEach { (k, s) -> o.put(k.toString(), s) } })
 
     private fun metaFromJson(o: JSONObject) = RouteMeta(
@@ -265,6 +370,12 @@ class RouteStore private constructor(ctx: Context) {
         o.optInt("v", 0),
         o.optString("notes", ""), o.optInt("feeling", 0),
         o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } } ?: emptyList(),
+        runCatching {
+            o.optJSONArray("laps")?.let { a ->
+                (0 until a.length()).map { i -> a.getJSONArray(i).let { LapMark(it.getDouble(0), it.getLong(1), it.getLong(2)) } }
+            }
+        }.getOrNull() ?: emptyList(),
+        o.optInt("avgHr", 0), o.optInt("maxHr", 0),
     )
 
     companion object {
@@ -325,6 +436,18 @@ class Prefs(ctx: Context) {
     var autoPauseLevel: Int
         get() = sp.getInt("autoPauseLevel", 1)
         set(v) = sp.edit().putInt("autoPauseLevel", v).apply()
+    /** Mark a lap automatically every this many kilometres; 0 means off. */
+    var autoLapKm: Int
+        get() = sp.getInt("autoLapKm", 0)
+        set(v) = sp.edit().putInt("autoLapKm", v).apply()
+    /** The pages of the big-number ride screen: field keys joined by commas, pages by "|". */
+    var ridePages: String
+        get() = sp.getString("ridePages", "speed,distance,moving|avg,max,climb,elapsed|lapDistance,lapTime,lapAvg,clock")!!
+        set(v) = sp.edit().putString("ridePages", v).apply()
+    /** The rider's own interval workout: warm-up min, repeats, work s, rest s, cool-down min. */
+    var customWorkout: String
+        get() = sp.getString("customWorkout", "10,4,180,120,10")!!
+        set(v) = sp.edit().putString("customWorkout", v).apply()
     /** Bike parts being tracked for wear: name, service interval in km, and when last reset. */
     var care: List<CareItem>
         get() {

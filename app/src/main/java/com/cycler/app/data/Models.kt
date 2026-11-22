@@ -39,9 +39,62 @@ data class RouteMeta(
     /** How the ride felt, 1 (rough) to 5 (great); 0 when not set. */
     val feeling: Int = 0,
     val tags: List<String> = emptyList(),
+    /** Where each lap ended, as totals since the start of the ride. */
+    val laps: List<LapMark> = emptyList(),
+    /** Heart rate from Health Connect, beats per minute; 0 when there is none. */
+    val avgHr: Int = 0,
+    val maxHr: Int = 0,
 ) {
     val difficulty: Difficulty get() = Difficulty.of(distanceM, ascentM)
 }
+
+/** The end of a lap: distance, moving time and total time since the ride began. */
+data class LapMark(val distanceM: Double, val movingMs: Long, val elapsedMs: Long)
+
+/** One block of a workout: what to do and for how long. [effort] runs 1 (easy) to 4 (all out). */
+class WorkoutStep(val label: String, val seconds: Int, val effort: Int)
+
+/** A timed plan for a ride: warm up, repeat hard and easy blocks, cool down. */
+class Workout(val name: String, val steps: List<WorkoutStep>) {
+    val totalS: Int get() = steps.sumOf { it.seconds }
+
+    /** Which step is running [elapsedS] into the ride and how long it has left; null once the workout is over. */
+    fun at(elapsedS: Long): Pair<Int, Int>? {
+        var t = elapsedS
+        steps.forEachIndexed { i, s ->
+            if (t < s.seconds) return i to (s.seconds - t).toInt()
+            t -= s.seconds
+        }
+        return null
+    }
+
+    companion object {
+        fun intervals(name: String, warmMin: Int, reps: Int, workS: Int, restS: Int, coolMin: Int, effort: Int = 3): Workout {
+            val steps = ArrayList<WorkoutStep>()
+            if (warmMin > 0) steps.add(WorkoutStep("Warm up", warmMin * 60, 1))
+            val word = when (effort) { 4 -> "All out"; 3 -> "Hard"; else -> "Steady" }
+            for (i in 1..reps) {
+                steps.add(WorkoutStep("$word $i of $reps", workS, effort))
+                if (restS > 0 && i < reps) steps.add(WorkoutStep("Easy", restS, 1))
+            }
+            if (coolMin > 0) steps.add(WorkoutStep("Cool down", coolMin * 60, 1))
+            return Workout(name, steps)
+        }
+
+        val presets: List<Workout> get() = listOf(
+            intervals("5 × 4 min hard", 10, 5, 240, 120, 10),
+            intervals("8 × 1 min sprints", 10, 8, 60, 120, 10, effort = 4),
+            intervals("3 × 10 min tempo", 10, 3, 600, 300, 10, effort = 2),
+            intervals("10 × 30 s on, 30 s off", 10, 10, 30, 30, 10, effort = 4),
+        )
+    }
+}
+
+/** A stretch of road the rider wants timed every time they ride it. */
+class Segment(val id: String, val name: String, val pts: List<Pt>, val lengthM: Double, val createdAt: Long)
+
+/** One timed pass over a segment. */
+data class Effort(val rideId: String, val startT: Long, val seconds: Long)
 
 /** The five answers to "How did it feel?", worst to best. */
 object Feeling {
@@ -361,6 +414,44 @@ object Geo {
                 segDist = 0.0
                 segStart = pts[i].t
             }
+        }
+        return out
+    }
+
+    /**
+     * Every pass a ride makes over a segment, as pairs of point indexes (where it entered
+     * and where it left). A pass must start near the segment's start, end near its end,
+     * cover about the same distance, and stay close to the segment in between.
+     */
+    fun matchSegment(ride: List<Pt>, rideCum: DoubleArray, seg: List<Pt>, segLen: Double): List<Pair<Int, Int>> {
+        val out = ArrayList<Pair<Int, Int>>()
+        if (ride.size < 2 || seg.size < 2 || segLen < 100.0) return out
+        val start = seg.first()
+        val end = seg.last()
+        val near = 35.0
+        val checks = listOf(0.25, 0.5, 0.75).map { f -> seg[((seg.size - 1) * f).toInt()] }
+        var i = 0
+        while (i < ride.size - 1) {
+            if (dist(ride[i], start) > near) { i++; continue }
+            // Take the closest point of this approach to the start as the entry.
+            var entry = i
+            while (entry + 1 < ride.size && dist(ride[entry + 1], start) < dist(ride[entry], start)) entry++
+            var exit = -1
+            var j = entry + 1
+            while (j < ride.size && rideCum[j] - rideCum[entry] <= segLen * 1.35) {
+                if (rideCum[j] - rideCum[entry] >= segLen * 0.8 && dist(ride[j], end) <= near) {
+                    exit = j
+                    while (exit + 1 < ride.size && dist(ride[exit + 1], end) < dist(ride[exit], end)) exit++
+                    break
+                }
+                j++
+            }
+            if (exit > entry) {
+                // Same road, not just the same two ends: the middle of the segment must be on the ride too.
+                val onRoad = checks.all { c -> (entry..exit).any { k -> dist(ride[k], c) <= 45.0 } }
+                if (onRoad) { out.add(entry to exit); i = exit; continue }
+            }
+            i = entry + 1
         }
         return out
     }
