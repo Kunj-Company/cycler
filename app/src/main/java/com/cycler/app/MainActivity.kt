@@ -52,6 +52,7 @@ import com.cycler.app.data.Geo
 import com.cycler.app.data.Prefs
 import com.cycler.app.data.Pt
 import com.cycler.app.data.Route
+import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteStore
 import com.cycler.app.data.RouteType
 import com.cycler.app.net.BRouter
@@ -70,6 +71,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.maplibre.android.MapLibre
 import kotlin.math.abs
+import kotlin.random.Random
 
 class CyclerApp : Application() {
     override fun onCreate() {
@@ -86,6 +88,12 @@ enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 enum class PlanMode(val label: String) { AB("A to B"), LOOP("Loop"), PAST("My rides") }
+
+/** A chosen place in the planner. */
+class Stop(val pt: Pt, val label: String)
+
+/** Which field the next long-press or search result fills. */
+enum class Pick { START, END, VIA }
 
 class RouteOption(
     val label: String,
@@ -111,9 +119,17 @@ class MainVm(app: Application) : AndroidViewModel(app) {
 
     // Planning
     var planMode by mutableStateOf(PlanMode.AB)
-    var planPoints by mutableStateOf(listOf<Pt>())
-    var fromMyLocation by mutableStateOf(true)
+    /** null means "start from where I am". */
+    var start by mutableStateOf<Stop?>(null)
+    var end by mutableStateOf<Stop?>(null)
+    var vias by mutableStateOf(listOf<Stop>())
+    var pick by mutableStateOf(Pick.END)
     var loopKm by mutableFloatStateOf(20f)
+
+    // Quick suggestions shown on the Routes tab
+    var suggestions by mutableStateOf(listOf<RouteOption>())
+    var suggestBusy by mutableStateOf(false)
+    var suggestError by mutableStateOf<String?>(null)
     var options by mutableStateOf(listOf<RouteOption>())
     var selected by mutableIntStateOf(0)
     var busy by mutableStateOf(false)
@@ -126,7 +142,10 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearPlan() {
-        planPoints = emptyList()
+        start = null
+        end = null
+        vias = emptyList()
+        pick = Pick.END
         options = emptyList()
         selected = 0
         error = null
@@ -182,6 +201,61 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             selected = 0
             busy = false
         }
+    }
+
+    /** A mix of short, medium and long loops from [from], in varied directions. */
+    fun suggestNearby(from: Pt) {
+        if (suggestBusy) return
+        suggestBusy = true
+        suggestError = null
+        val prof = profile
+        val base = Random.nextDouble(360.0)
+        val plan = listOf(10.0 to "Short", 25.0 to "Medium", 50.0 to "Long").flatMapIndexed { i, (km, name) ->
+            listOf(base + i * 60, base + i * 60 + 180).map { Triple(km * 1000, name, it % 360) }
+        }
+        viewModelScope.launch {
+            val results = withContext(Dispatchers.IO) {
+                plan.map { (target, name, bearing) ->
+                    async {
+                        runCatching {
+                            val r = loop(from, bearing, target, prof)
+                            RouteOption("$name loop · ${compass(bearing)}", r.pts, r.distanceM, r.ascentM, r.timeS)
+                        }
+                    }
+                }.awaitAll()
+            }
+            val ok = results.mapNotNull { it.getOrNull() }.sortedBy { it.distanceM }
+            suggestions = ok
+            if (ok.isEmpty()) {
+                suggestError = results.firstNotNullOfOrNull { it.exceptionOrNull() }?.message ?: "No routes found here"
+            }
+            suggestBusy = false
+        }
+    }
+
+    private fun compass(bearing: Double): String =
+        listOf("north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west")[
+            (((bearing % 360 + 360) % 360 + 22.5) / 45).toInt() % 8
+        ]
+
+    /** Show a suggestion in the planner, where it can be previewed, saved or ridden. */
+    fun openSuggestion(index: Int) {
+        clearPlan()
+        planMode = PlanMode.LOOP
+        options = suggestions
+        selected = index
+        tab = Tab.PLAN
+    }
+
+    /** Follow the selected option on the Ride screen without saving it first. */
+    fun rideSelected() {
+        val o = options.getOrNull(selected) ?: return
+        val meta = RouteMeta(
+            "", o.label, RouteType.PLANNED, System.currentTimeMillis(), o.distanceM, o.ascentM, o.timeS,
+            o.pts.first().lat, o.pts.first().lon,
+        )
+        guide = Route(meta, o.pts)
+        tab = Tab.RIDE
     }
 
     private fun loop(start: Pt, bearing: Double, target: Double, prof: String): BRouter.Result {
@@ -293,7 +367,7 @@ fun App(vm: MainVm = viewModel()) {
             when (vm.tab) {
                 Tab.RIDE -> RideScreen(vm, myLoc, granted, request)
                 Tab.PLAN -> PlanScreen(vm, myLoc)
-                Tab.ROUTES -> RoutesScreen(vm)
+                Tab.ROUTES -> RoutesScreen(vm, myLoc)
                 Tab.SETTINGS -> SettingsScreen(vm)
             }
         }

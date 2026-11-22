@@ -1,6 +1,7 @@
 package com.cycler.app.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -13,12 +14,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -45,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
@@ -52,16 +57,24 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cycler.app.MainVm
+import com.cycler.app.Pick
 import com.cycler.app.PlanMode
+import com.cycler.app.Stop
 import com.cycler.app.Tab
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Pt
 import com.cycler.app.data.Route
+import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteType
 import com.cycler.app.net.Photon
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
+
+private const val GREEN = "#2E7D32"
+private const val RED = "#D32F2F"
+private const val ORANGE = "#FB8C00"
 
 @Composable
 fun PlanScreen(vm: MainVm, myLoc: Pt?) {
@@ -79,11 +92,13 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
 
     val mode = vm.planMode
     val option = vm.options.getOrNull(vm.selected)
-    val abPoints = if (vm.fromMyLocation && myLoc != null) listOf(myLoc) + vm.planPoints else vm.planPoints
-    val loopStart = vm.planPoints.firstOrNull() ?: myLoc
+    // In loop mode the only thing to pick is the start.
+    val pick = if (mode == PlanMode.LOOP) Pick.START else vm.pick
+    val startPt = vm.start?.pt ?: myLoc
+    val abPoints = listOfNotNull(startPt) + vm.vias.map { it.pt } + listOfNotNull(vm.end?.pt)
 
     LaunchedEffect(myLoc) {
-        if (!centred && myLoc != null && vm.options.isEmpty() && vm.planPoints.isEmpty()) {
+        if (!centred && myLoc != null && vm.options.isEmpty() && vm.end == null && vm.start == null) {
             camera = CameraCmd(listOf(myLoc), 13.5)
             centred = true
         }
@@ -92,11 +107,13 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
         vm.options.getOrNull(vm.selected)?.let { camera = CameraCmd(it.pts); centred = true }
     }
 
-    fun addPoint(p: Pt) {
-        when (mode) {
-            PlanMode.AB -> vm.planPoints = vm.planPoints + p
-            PlanMode.LOOP -> vm.planPoints = listOf(p)
-            PlanMode.PAST -> return
+    fun setPoint(p: Pt, label: String) {
+        if (mode == PlanMode.PAST) return
+        val stop = Stop(p, label)
+        when (pick) {
+            Pick.START -> { vm.start = stop; if (mode == PlanMode.AB && vm.end == null) vm.pick = Pick.END }
+            Pick.END -> vm.end = stop
+            Pick.VIA -> vm.vias = vm.vias + stop
         }
         vm.options = emptyList()
         vm.error = null
@@ -130,21 +147,16 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
             }
         }
     }
-    val dots = remember(myLoc, vm.planPoints, vm.fromMyLocation, mode) {
+    val dots = remember(myLoc, vm.start, vm.end, vm.vias, mode) {
         buildList {
+            myLoc?.let { add(MapDot(it, COLOR_ME, 7f)) }
             if (mode != PlanMode.PAST) {
-                val pts = vm.planPoints
-                pts.forEachIndexed { i, p ->
-                    val color = when {
-                        mode == PlanMode.LOOP -> "#2E7D32"
-                        i == pts.lastIndex && (pts.size > 1 || vm.fromMyLocation) -> "#D32F2F"
-                        i == 0 && !vm.fromMyLocation -> "#2E7D32"
-                        else -> "#FB8C00"
-                    }
-                    add(MapDot(p, color, 8f))
+                vm.start?.let { add(MapDot(it.pt, GREEN, 9f)) }
+                if (mode == PlanMode.AB) {
+                    vm.vias.forEach { add(MapDot(it.pt, ORANGE, 7f)) }
+                    vm.end?.let { add(MapDot(it.pt, RED, 9f)) }
                 }
             }
-            myLoc?.let { add(MapDot(it, COLOR_ME, 7f)) }
         }
     }
 
@@ -153,7 +165,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
             CyclerMap(
                 Modifier.fillMaxSize(), vm.mapStyle, lines, dots, camera,
                 initial = vm.prefs.lastLoc,
-                onLongPress = if (mode == PlanMode.PAST) null else { p -> addPoint(p) },
+                onLongPress = if (mode == PlanMode.PAST) null else { p -> setPoint(p, "Pin on map") },
             )
             Column(Modifier.fillMaxWidth().padding(10.dp)) {
                 Surface(shape = MaterialTheme.shapes.large, tonalElevation = 3.dp, shadowElevation = 3.dp) {
@@ -176,7 +188,15 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                             TextField(
                                 value = query,
                                 onValueChange = { query = it; if (it.isBlank()) { places = emptyList(); searchNote = null } },
-                                placeholder = { Text(if (mode == PlanMode.AB) "Search a place to add" else "Search a start point") },
+                                placeholder = {
+                                    Text(
+                                        when (pick) {
+                                            Pick.START -> "Search for a start point"
+                                            Pick.END -> "Search for your destination"
+                                            Pick.VIA -> "Search for a stop on the way"
+                                        }
+                                    )
+                                },
                                 singleLine = true,
                                 trailingIcon = { IconButton({ runSearch() }) { Icon(Icons.Filled.Search, "Search") } },
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -194,7 +214,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                                     pl.label, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.bodyMedium,
                                     modifier = Modifier.fillMaxWidth().clickable {
-                                        addPoint(pl.pt)
+                                        setPoint(pl.pt, pl.label)
                                         camera = CameraCmd(listOf(pl.pt), 14.0)
                                         centred = true
                                         places = emptyList()
@@ -211,54 +231,82 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
 
         Surface(tonalElevation = 2.dp) {
             Column(
-                Modifier.fillMaxWidth().heightIn(max = 330.dp).verticalScroll(rememberScrollState()).padding(14.dp),
+                Modifier.fillMaxWidth().heightIn(max = 350.dp).verticalScroll(rememberScrollState()).padding(14.dp),
             ) {
+                val hint = "Long-press the map or search above"
+                val startText = vm.start?.label ?: if (myLoc != null) "My location" else "My location (waiting for GPS…)"
                 when (mode) {
                     PlanMode.AB -> {
-                        Text(
-                            if (vm.planPoints.isEmpty()) "Long-press the map or search to add your destination. Add more points to shape the route."
-                            else "${vm.planPoints.size} point${if (vm.planPoints.size > 1) "s" else ""} added" +
-                                if (vm.fromMyLocation && myLoc == null) " · waiting for your location…" else "",
-                            style = MaterialTheme.typography.bodyMedium,
+                        StopRow(
+                            Color(0xFF2E7D32), "Start", startText, pick == Pick.START,
+                            onSelect = { vm.pick = Pick.START },
+                            onClear = if (vm.start != null) ({ vm.start = null; vm.options = emptyList() }) else null,
+                            clearLabel = "Use my location",
+                        )
+                        vm.vias.forEachIndexed { i, v ->
+                            StopRow(
+                                Color(0xFFFB8C00), "Stop ${i + 1}", v.label, false, onSelect = {},
+                                onClear = { vm.vias = vm.vias.filterIndexed { k, _ -> k != i }; vm.options = emptyList() },
+                                clearLabel = "Remove stop",
+                            )
+                        }
+                        if (pick == Pick.VIA) {
+                            StopRow(Color(0xFFFB8C00), "Add a stop", hint, true, onSelect = {}, onClear = { vm.pick = Pick.END }, clearLabel = "Cancel")
+                        }
+                        StopRow(
+                            Color(0xFFD32F2F), "End", vm.end?.label ?: if (pick == Pick.END) hint else "Tap to choose",
+                            pick == Pick.END,
+                            onSelect = { vm.pick = Pick.END },
+                            onClear = if (vm.end != null) ({ vm.end = null; vm.options = emptyList() }) else null,
+                            clearLabel = "Clear end",
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            FilterChip(
-                                selected = vm.fromMyLocation,
-                                onClick = { vm.fromMyLocation = !vm.fromMyLocation; vm.options = emptyList() },
-                                label = { Text("Start from my location") },
-                            )
-                            Spacer(Modifier.weight(1f))
+                            TextButton({ vm.pick = Pick.VIA }, enabled = pick != Pick.VIA) { Text("+ Add stop") }
                             TextButton(
-                                { vm.planPoints = vm.planPoints.dropLast(1); vm.options = emptyList() },
-                                enabled = vm.planPoints.isNotEmpty(),
-                            ) { Text("Undo") }
-                            TextButton({ vm.clearPlan() }, enabled = vm.planPoints.isNotEmpty()) { Text("Clear") }
+                                {
+                                    val oldStart = vm.start ?: myLoc?.let { Stop(it, "My location") }
+                                    vm.start = vm.end
+                                    vm.end = oldStart
+                                    vm.vias = vm.vias.reversed()
+                                    vm.options = emptyList()
+                                },
+                                enabled = vm.end != null,
+                            ) { Text("Swap") }
+                            Spacer(Modifier.weight(1f))
+                            TextButton({ vm.clearPlan() }) { Text("Clear") }
                         }
                         Button(
                             { vm.findRoutes(abPoints) },
-                            enabled = abPoints.size >= 2 && !vm.busy,
+                            enabled = startPt != null && vm.end != null && !vm.busy,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(if (vm.options.isEmpty()) "Find routes" else "Find again") }
                     }
                     PlanMode.LOOP -> {
-                        Text(
-                            when {
-                                vm.planPoints.isNotEmpty() -> "Starting from the point you picked. Long-press to move it."
-                                myLoc != null -> "Starting from where you are. Long-press the map to start elsewhere."
-                                else -> "Waiting for your location… or long-press the map to pick a start."
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
+                        StopRow(
+                            Color(0xFF2E7D32), "Start and finish", startText, true, onSelect = {},
+                            onClear = if (vm.start != null) ({ vm.start = null; vm.options = emptyList() }) else null,
+                            clearLabel = "Use my location",
                         )
-                        Spacer(Modifier.height(6.dp))
-                        Text("Distance: about ${vm.loopKm.toInt()} km", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Long-press the map or search to start somewhere else.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("Distance: about ${vm.loopKm.roundToInt()} km", fontWeight = FontWeight.SemiBold)
                         Slider(
                             value = vm.loopKm,
-                            onValueChange = { vm.loopKm = (it / 5).toInt() * 5f },
-                            valueRange = 5f..120f,
+                            onValueChange = { vm.loopKm = ((it / 5f).roundToInt() * 5f).coerceIn(5f, 200f) },
+                            valueRange = 5f..200f,
                         )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("5 km", style = MaterialTheme.typography.labelSmall)
+                            Text("200 km", style = MaterialTheme.typography.labelSmall)
+                        }
+                        Spacer(Modifier.height(6.dp))
                         Button(
-                            { loopStart?.let { vm.findLoops(it) } },
-                            enabled = loopStart != null && !vm.busy,
+                            { startPt?.let { vm.findLoops(it) } },
+                            enabled = startPt != null && !vm.busy,
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text(if (vm.options.isEmpty()) "Suggest loops" else "Suggest again") }
                     }
@@ -301,8 +349,8 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                                         if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
                                     ),
                                 ) {
-                                    Column(Modifier.padding(12.dp).width(132.dp)) {
-                                        Text(o.label, style = MaterialTheme.typography.labelLarge)
+                                    Column(Modifier.padding(12.dp).width(140.dp)) {
+                                        Text(o.label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(Fmt.km(o.distanceM), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                                         Text("↑ ${o.ascentM.toInt()} m · ${Fmt.dur(o.timeS)}", style = MaterialTheme.typography.bodySmall)
                                         Text(
@@ -319,7 +367,10 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                             Spacer(Modifier.height(10.dp))
                             ElevationChart(option.pts)
                             Spacer(Modifier.height(10.dp))
-                            Button({ showSave = true }, Modifier.fillMaxWidth()) { Text("Save this route") }
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button({ showSave = true }, Modifier.weight(1f)) { Text("Save route") }
+                                OutlinedButton({ vm.rideSelected() }, Modifier.weight(1f)) { Text("Ride it now") }
+                            }
                         }
                     }
                 }
@@ -328,15 +379,45 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
     }
 
     if (showSave && option != null) {
-        val default = if (mode == PlanMode.LOOP) "${option.label} · ${Fmt.km(option.distanceM)}" else "Route · ${Fmt.km(option.distanceM)}"
+        val default = when {
+            mode == PlanMode.LOOP -> "${option.label} · ${Fmt.km(option.distanceM)}"
+            vm.end != null && vm.end?.label != "Pin on map" -> "To " + vm.end!!.label.substringBefore(",")
+            else -> "Route · ${Fmt.km(option.distanceM)}"
+        }
         NameDialog("Save route", default, "Save", { showSave = false; vm.saveSelected(it) }, { showSave = false })
+    }
+}
+
+/** One line of the trip: a coloured dot, what it is, and the chosen place. */
+@Composable
+private fun StopRow(
+    color: Color, title: String, value: String, active: Boolean,
+    onSelect: () -> Unit, onClear: (() -> Unit)?, clearLabel: String,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(MaterialTheme.shapes.medium)
+            .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .clickable(onClick = onSelect).padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(14.dp).clip(CircleShape).background(color))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (onClear != null) {
+            IconButton(onClear) { Icon(Icons.Filled.Close, clearLabel) }
+        } else {
+            Spacer(Modifier.height(48.dp))
+        }
     }
 }
 
 @Composable
 private fun PastRides(
     vm: MainVm,
-    metas: List<com.cycler.app.data.RouteMeta>,
+    metas: List<RouteMeta>,
     myLoc: Pt?,
     shown: Route?,
     onShow: (Route?) -> Unit,
@@ -363,7 +444,8 @@ private fun PastRides(
                         val pts = shown.pts.reversed().map { it.copy(t = 0L) }
                         vm.store.save(
                             shown.meta.name + " (reversed)", RouteType.PLANNED, pts,
-                            shown.meta.durationS, shown.meta.distanceM, Geo.ascent(pts, smooth = shown.meta.type == RouteType.RECORDED),
+                            shown.meta.durationS, shown.meta.distanceM,
+                            Geo.ascent(pts, smooth = shown.meta.type == RouteType.RECORDED),
                         )
                     }
                     vm.detailId = id

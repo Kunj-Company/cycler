@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
@@ -31,7 +32,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -64,7 +67,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun RoutesScreen(vm: MainVm) {
+fun RoutesScreen(vm: MainVm, myLoc: com.cycler.app.data.Pt?) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val metas by vm.store.metas.collectAsState()
@@ -106,16 +109,71 @@ fun RoutesScreen(vm: MainVm) {
             FilterChip(filter == RouteType.PLANNED, { filter = RouteType.PLANNED }, { Text("Planned") })
         }
         val shown = metas.filter { filter == null || it.type == filter }
-        if (shown.isEmpty()) {
+        if (shown.isEmpty() && vm.suggestions.isEmpty() && !vm.suggestBusy) {
             Text(
-                "Nothing here yet. Record a ride from the Ride tab or plan one from the Plan tab.",
-                Modifier.padding(top = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,
+                "Nothing saved yet. Record a ride from the Ride tab or plan one from the Plan tab.",
+                Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 10.dp),
         ) {
+            item(key = "suggest") {
+                Column {
+                    Button(
+                        { myLoc?.let { vm.suggestNearby(it) } },
+                        enabled = myLoc != null && !vm.suggestBusy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            when {
+                                myLoc == null -> "Waiting for your location…"
+                                vm.suggestions.isEmpty() -> "Suggest routes near me"
+                                else -> "Suggest different routes"
+                            }
+                        )
+                    }
+                    if (vm.suggestBusy) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
+                        Text(
+                            "Finding short, medium and long loops from where you are…",
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    vm.suggestError?.let {
+                        Text(
+                            "Couldn't suggest routes: $it", color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    if (vm.suggestions.isNotEmpty()) {
+                        Text(
+                            "Suggested from your location", style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                }
+            }
+            itemsIndexed(vm.suggestions) { i, o ->
+                OutlinedCard(onClick = { vm.openSuggestion(i) }, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(o.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                "${Fmt.km(o.distanceM)} · ↑ ${o.ascentM.toInt()} m · about ${Fmt.dur(o.timeS)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        Text("Preview", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            if (vm.suggestions.isNotEmpty() && shown.isNotEmpty()) {
+                item(key = "saved-header") {
+                    Text("Saved", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+                }
+            }
             items(shown, key = { it.id }) { m ->
                 Card(onClick = { vm.detailId = m.id }, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {

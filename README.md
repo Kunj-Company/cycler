@@ -20,7 +20,7 @@ Or install the prebuilt debug build directly:
   with distance, climb, time and an elevation profile.
 - **Plan → Loop**: pick a distance, get round trips heading north, east, south and west.
 - **Plan → My rides**: saved routes nearest first; ride one again or save it reversed.
-- **Routes**: everything saved, with map, stats, elevation, rename, delete, GPX import/export.
+- **Routes**: a "Suggest routes near me" button (short, medium and long loops from where you are), plus everything saved, with map, stats, elevation, rename, delete, GPX import/export.
 - **Settings**: bike type (road, hybrid, gravel, MTB), map style, keep screen on.
 
 ## Services used (all free, no API keys)
