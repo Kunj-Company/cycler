@@ -41,6 +41,7 @@ object WidgetLaunch {
         vm.showSegments = false
         vm.showOffline = false
         vm.showHeatmap = false
+        vm.showCare = false
         vm.showFieldEditor = false
         vm.detailId = null
 

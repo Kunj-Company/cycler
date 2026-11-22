@@ -339,6 +339,7 @@ class WidgetTest {
     @Test fun start_extra_starts_one_ride_and_is_consumed() {
         shadowOf(ctx).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
         val vm = MainVm(ctx)
+        vm.onboarded = true
         vm.tab = Tab.ACTIVITY
         val i = startIntent()
         assertTrue(WidgetLaunch.handle(ctx, i, vm))
@@ -348,6 +349,14 @@ class WidgetTest {
         assertFalse(WidgetLaunch.handle(ctx, i, vm))
         assertNull(shadowOf(ctx).nextStartedService)
         assertNull(i.getStringExtra(WidgetIntents.EXTRA_WIDGET_ACTION))
+    }
+
+    @Test fun start_extra_during_first_launch_setup_does_not_start_a_ride() {
+        shadowOf(ctx).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+        val vm = MainVm(ctx)
+        vm.onboarded = false
+        WidgetLaunch.handle(ctx, startIntent(), vm)
+        assertNull(shadowOf(ctx).nextStartedService)
     }
 
     @Test fun start_extra_without_location_permission_only_opens_the_ride_tab() {
