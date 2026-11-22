@@ -1,3 +1,50 @@
 <resources>
     <string name="app_name">Cycler</string>
+
+    <!-- Home-screen widgets -->
+    <string name="widget_ride_name">Ride</string>
+    <string name="widget_ride_desc">Start a ride, then pause it or mark a lap from the home screen. Shows this week\'s distance.</string>
+    <string name="widget_week_name">This week</string>
+    <string name="widget_week_desc">Distance, rides and time this week against your weekly goal.</string>
+    <string name="widget_last_name">Last ride</string>
+    <string name="widget_last_desc">Your most recent ride with its route, distance, time and climb.</string>
+    <string name="widget_stats_name">Riding stats</string>
+    <string name="widget_stats_desc">Distance for each of the last 7 days, plus this month\'s totals.</string>
+
+    <string name="widget_loading">Cycler</string>
+    <string name="widget_open_cycler">Open Cycler</string>
+    <string name="widget_start_ride">Start ride</string>
+    <string name="widget_pause">Pause</string>
+    <string name="widget_resume">Resume</string>
+    <string name="widget_lap">Lap</string>
+    <string name="widget_status_recording">Recording</string>
+    <string name="widget_status_paused">Paused</string>
+    <string name="widget_status_auto_paused">Auto-paused</string>
+
+    <string name="widget_km">%1$s km</string>
+    <string name="widget_m">%1$s m</string>
+    <string name="widget_kmh_avg">avg %1$s km/h</string>
+    <string name="widget_week_progress">%1$s / %2$d km</string>
+    <string name="widget_this_week">this week</string>
+    <string name="widget_this_week_goal_reached">this week · goal reached</string>
+    <string name="widget_week_of_goal">of %1$d km this week</string>
+    <string name="widget_week_goal_reached">goal reached · %1$d km</string>
+    <string name="widget_paused_prefix">Paused · %1$s</string>
+    <plurals name="widget_rides">
+        <item quantity="one">%d ride</item>
+        <item quantity="other">%d rides</item>
+    </plurals>
+
+    <string name="widget_no_rides">No rides yet</string>
+    <string name="widget_no_rides_hint">Record your first ride.</string>
+    <string name="widget_ride_fallback_name">Ride</string>
+    <string name="widget_label_distance">Distance</string>
+    <string name="widget_label_moving">Moving</string>
+    <string name="widget_label_climb">Climb</string>
+    <string name="widget_label_avg_speed">Avg km/h</string>
+
+    <string name="widget_last_7_days">Last 7 days</string>
+    <string name="widget_this_month">This month</string>
+    <string name="widget_month_time">%1$s moving</string>
+    <string name="widget_month_climb">%1$s climb</string>
 </resources>

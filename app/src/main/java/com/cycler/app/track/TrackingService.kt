@@ -35,6 +35,7 @@ import com.cycler.app.data.Pt
 import com.cycler.app.data.RouteStore
 import com.cycler.app.data.RouteType
 import com.cycler.app.data.Turn
+import com.cycler.app.widget.Widgets
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -98,6 +99,7 @@ class TrackingService : Service(), LocationListener {
     private var lastFix: Location? = null
     private var skipNextSegment = false
     private var lastNotify = 0L
+    private var lastWidgetUpdate = 0L
     private var stillSince = 0L
     private var autoPauseOn = true
     private var offRouteAlertOn = true
@@ -229,6 +231,8 @@ class TrackingService : Service(), LocationListener {
         )
         ticker.removeCallbacks(tick)
         if (workout != null) ticker.postDelayed(tick, 1000)
+        lastWidgetUpdate = System.currentTimeMillis()
+        Widgets.updateAll(this)
     }
 
     @SuppressLint("WakelockTimeout")
@@ -253,6 +257,7 @@ class TrackingService : Service(), LocationListener {
         runCatching { lm.removeUpdates(this) }
         releaseWakeLock()
         notify("Paused")
+        Widgets.updateAll(this)
     }
 
     @SuppressLint("MissingPermission")
@@ -271,6 +276,7 @@ class TrackingService : Service(), LocationListener {
             if (it.status != TrackStatus.PAUSED) it
             else it.copy(status = TrackStatus.RECORDING, resumedAt = System.currentTimeMillis())
         }
+        Widgets.updateAll(this)
     }
 
     private fun finish(name: String?, save: Boolean) {
@@ -308,6 +314,7 @@ class TrackingService : Service(), LocationListener {
         }
         if (id != null || !save || s.points.size < 2) store.recordingFile.delete()
         state.value = TrackState(savedId = id, notice = notice)
+        Widgets.updateAll(this)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -425,6 +432,11 @@ class TrackingService : Service(), LocationListener {
             lastNotify = now
             notify(String.format(Locale.US, "%.2f km · %.1f km/h", state.value.distanceM / 1000, speed * 3.6f))
         }
+        // The home-screen widgets show live numbers, but a refresh every fix would be wasteful.
+        if (now - lastWidgetUpdate > 10_000) {
+            lastWidgetUpdate = now
+            Widgets.updateAll(this)
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -452,6 +464,7 @@ class TrackingService : Service(), LocationListener {
             // The system ended the service mid-ride. Save what was recorded instead of leaving the UI frozen.
             val id = runCatching { RouteStore.get(this).recoverUnfinished() }.getOrNull()
             state.value = TrackState(savedId = id, notice = "Recording stopped unexpectedly. Your ride so far was saved.")
+            Widgets.updateAll(this)
         }
         super.onDestroy()
     }

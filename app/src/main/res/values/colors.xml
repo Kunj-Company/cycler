@@ -1,3 +1,14 @@
 <resources>
     <color name="ic_bg">#1B5E20</color>
+
+    <!-- Home-screen widgets. Neutral surface, ink text, one blue accent; values-night swaps them. -->
+    <color name="widget_surface">#FFFFFF</color>
+    <color name="widget_subtle">#F0F0EE</color>
+    <color name="widget_ink">#1C1C1A</color>
+    <color name="widget_muted">#6B6B66</color>
+    <color name="widget_accent">#2563EB</color>
+    <color name="widget_on_accent">#FFFFFF</color>
+    <color name="widget_track">#E5E5E2</color>
+    <color name="widget_danger">#D4403A</color>
+    <color name="widget_success">#2F7D4F</color>
 </resources>

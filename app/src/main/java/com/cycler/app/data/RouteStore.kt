@@ -7,18 +7,23 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
+import com.cycler.app.widget.Widgets
 
 /**
  * Everything is stored as plain JSON files inside the app's private folder:
  * routes/<id>.meta.json (summary) and routes/<id>.pts.json (the points).
  */
 class RouteStore private constructor(ctx: Context) {
+    private val appContext = ctx.applicationContext
     private val dir = File(ctx.filesDir, "routes").apply { mkdirs() }
     /** Points of a ride in progress, appended as they arrive so a crash loses nothing. */
     val recordingFile = File(ctx.filesDir, "recording.csv")
 
     private val _metas = MutableStateFlow<List<RouteMeta>>(emptyList())
     val metas: StateFlow<List<RouteMeta>> = _metas
+
+    /** Set once the first load is done; every later reload (a save, rename, delete or restore) refreshes the home-screen widgets. */
+    private var loaded = false
 
     init { reload() }
 
@@ -43,6 +48,7 @@ class RouteStore private constructor(ctx: Context) {
             }.getOrNull()
         }
         _metas.value = list.sortedByDescending { it.createdAt }
+        if (loaded) Widgets.updateAll(appContext) else loaded = true
     }
 
     @Synchronized
@@ -390,6 +396,7 @@ class RouteStore private constructor(ctx: Context) {
 }
 
 class Prefs(ctx: Context) {
+    private val appContext = ctx.applicationContext
     private val sp = ctx.getSharedPreferences("cycler", Context.MODE_PRIVATE)
 
     var profile: String
@@ -416,7 +423,7 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putBoolean("voice", v).apply()
     var weeklyGoalKm: Int
         get() = sp.getInt("weeklyGoalKm", 50)
-        set(v) = sp.edit().putInt("weeklyGoalKm", v).apply()
+        set(v) { sp.edit().putInt("weeklyGoalKm", v).apply(); Widgets.updateAll(appContext) }
     /** Whether the first-launch setup has been completed or skipped. */
     var onboarded: Boolean
         get() = sp.getBoolean("onboarded", false)

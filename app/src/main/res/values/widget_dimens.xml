@@ -1,0 +1,5 @@
+<resources>
+    <!-- Fixed corners for Android 11 and older; values-v31 uses the system's own radius. -->
+    <dimen name="widget_radius">20dp</dimen>
+    <dimen name="widget_inner_radius">10dp</dimen>
+</resources>
