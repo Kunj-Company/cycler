@@ -171,4 +171,22 @@ class GeoTest {
         assertEquals(1.0, s.zones[5], 0.05)   // all of it above 30 km/h
         assertTrue(s.kcal(70) > 0)
     }
+
+    /** Writes a FIT and a TCX file to build/export so an independent parser can read them back. */
+    @Test fun exports_fit_and_tcx() {
+        var t = 1_795_000_000_000L
+        val pts = north(120).mapIndexed { i, p -> t += 12_000L; p.copy(t = t, ele = 900.0 + i * 0.5) }
+        val meta = com.cycler.app.data.RouteMeta(
+            "x", "Export <test> & ride", com.cycler.app.data.RouteType.RECORDED, pts.first().t, 12_000.0, 60.0, 1380, 0.0, 0.0,
+            maxSpeedMs = 9.1, elapsedS = 1440,
+            laps = listOf(com.cycler.app.data.LapMark(5000.0, 575_000, 600_000), com.cycler.app.data.LapMark(12_000.0, 1_380_000, 1_440_000)),
+            avgHr = 142, maxHr = 171,
+        )
+        val hr = pts.map { it.t to (130 + (it.t / 12_000 % 40).toInt()) }
+        val route = com.cycler.app.data.Route(meta, pts)
+        val dir = java.io.File("build/export").apply { mkdirs() }
+        java.io.File(dir, "ride.fit").outputStream().use { com.cycler.app.data.Fit.write(route, hr, it) }
+        java.io.File(dir, "ride.tcx").writeText(com.cycler.app.data.Tcx.write(route, hr))
+        assertTrue(java.io.File(dir, "ride.fit").length() > 2000)
+    }
 }

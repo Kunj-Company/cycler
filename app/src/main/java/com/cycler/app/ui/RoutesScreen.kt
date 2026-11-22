@@ -237,16 +237,27 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
         else withContext(Dispatchers.IO) { runCatching { Overpass.signalsAlong(r.pts) }.getOrNull() }
     }
 
-    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/gpx+xml")) { uri ->
+    // Export: GPX for anything, TCX and FIT for recorded rides (they need timestamps).
+    var exportOpen by remember { mutableStateOf(false) }
+    var exportAs by remember { mutableStateOf("gpx") }
+    fun exportBytes(r: Route, format: String): ByteArray {
+        val full = r.copy(meta = meta ?: r.meta)
+        val hr = vm.store.heartRate(id)
+        return when (format) {
+            "fit" -> java.io.ByteArrayOutputStream().also { com.cycler.app.data.Fit.write(full, hr, it) }.toByteArray()
+            "tcx" -> com.cycler.app.data.Tcx.write(full, hr).toByteArray()
+            else -> Gpx.write(full).toByteArray()
+        }
+    }
+    fun fileName(format: String) = (meta?.name ?: "ride").replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "ride" } + "." + format
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val r = route
         if (uri == null || r == null) return@rememberLauncherForActivityResult
         scope.launch {
             val ok = withContext(Dispatchers.IO) {
-                runCatching {
-                    ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Gpx.write(r.copy(meta = meta ?: r.meta)).toByteArray()) }
-                }.isSuccess
+                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(exportBytes(r, exportAs)) } }.isSuccess
             }
-            Toast.makeText(ctx, if (ok) "GPX saved" else "Couldn't save the file", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, if (ok) "${exportAs.uppercase()} file saved" else "Couldn't save the file", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -258,9 +269,7 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                     meta?.name ?: "Route", style = MaterialTheme.typography.titleLarge,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
-                IconButton({
-                    meta?.let { export.launch(it.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "route" } + ".gpx") }
-                }) { Icon(Icons.Outlined.FileDownload, "Export GPX", Modifier.size(22.dp)) }
+                IconButton({ exportOpen = true }) { Icon(Icons.Outlined.FileDownload, "Export", Modifier.size(22.dp)) }
                 IconButton({
                     if (meta?.type == RouteType.RECORDED) { vm.editIsNew = false; vm.editId = id } else rename = true
                 }) { Icon(Icons.Outlined.Edit, "Edit", Modifier.size(20.dp)) }
@@ -402,6 +411,48 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
         }
     }
 
+    if (exportOpen) {
+        val timed = meta?.type == RouteType.RECORDED && (route?.pts?.firstOrNull()?.t ?: 0L) > 0
+        AlertDialog(
+            onDismissRequest = { exportOpen = false },
+            shape = RadiusLarge,
+            title = { Text("Export", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Column {
+                    @Composable fun option(format: String, title: String, note: String, enabled: Boolean, share: Boolean = false) {
+                        Column(
+                            Modifier.fillMaxWidth().clip(Radius).clickable(enabled = enabled) {
+                                exportOpen = false
+                                val r = route ?: return@clickable
+                                if (share) scope.launch {
+                                    val out = java.io.File(ctx.cacheDir, "share").apply { mkdirs() }.resolve(fileName(format))
+                                    val ok = withContext(Dispatchers.IO) { runCatching { out.writeBytes(exportBytes(r, format)) }.isSuccess }
+                                    if (ok) com.cycler.app.share.VideoExport.share(ctx, listOf(out), "application/octet-stream", meta?.name ?: "")
+                                } else { exportAs = format; export.launch(fileName(format)) }
+                            }.padding(vertical = 10.dp),
+                        ) {
+                            Text(title, style = MaterialTheme.typography.bodyLarge, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Hairline()
+                    }
+                    option("fit", "Send to Strava or another app", "Shares a FIT file through the share sheet.", timed, share = true)
+                    option("fit", "Save as FIT", "For Strava, Garmin Connect, TrainingPeaks and most coaching tools.", timed)
+                    option("tcx", "Save as TCX", "Readable XML with time, distance and heart rate.", timed)
+                    option("gpx", "Save as GPX", "The route's shape, for maps and navigation apps.", true)
+                    if (!timed) {
+                        Text(
+                            "FIT and TCX need a recorded ride with times, so a planned route can only be saved as GPX.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 10.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton({ exportOpen = false }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+        )
+    }
     if (rename && meta != null) {
         NameDialog("Rename", meta.name, "Save", { rename = false; vm.store.rename(id, it) }, { rename = false })
     }
