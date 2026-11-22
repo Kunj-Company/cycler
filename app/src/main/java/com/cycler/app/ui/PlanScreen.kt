@@ -2,6 +2,7 @@ package com.cycler.app.ui
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -168,22 +171,19 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                 onLongPress = if (mode == PlanMode.PAST) null else { p -> setPoint(p, "Pin on map") },
             )
             Column(Modifier.fillMaxWidth().padding(10.dp)) {
-                Surface(shape = MaterialTheme.shapes.large, tonalElevation = 3.dp, shadowElevation = 3.dp) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, Cy.colors.border), shadowElevation = 2.dp,
+                ) {
                     Column {
-                        Row(
-                            Modifier.padding(horizontal = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            PlanMode.entries.forEach { m ->
-                                FilterChip(
-                                    selected = mode == m,
-                                    onClick = {
-                                        if (mode != m) { vm.clearPlan(); pastRoute = null; places = emptyList(); vm.planMode = m }
-                                    },
-                                    label = { Text(m.label) },
-                                )
-                            }
-                        }
+                        Segmented(
+                            PlanMode.entries.map { it.label }, PlanMode.entries.indexOf(mode),
+                            { i ->
+                                val m = PlanMode.entries[i]
+                                if (mode != m) { vm.clearPlan(); pastRoute = null; places = emptyList(); vm.planMode = m }
+                            },
+                            Modifier.fillMaxWidth().padding(6.dp),
+                        )
                         if (mode != PlanMode.PAST) {
                             TextField(
                                 value = query,
@@ -204,12 +204,16 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                                 colors = TextFieldDefaults.colors(
                                     focusedContainerColor = Color.Transparent,
                                     unfocusedContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
                                 ),
+                                textStyle = MaterialTheme.typography.bodyLarge,
                                 modifier = Modifier.fillMaxWidth(),
                             )
-                            if (searching) LinearProgressIndicator(Modifier.fillMaxWidth())
+                            if (searching) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Cy.colors.accent, trackColor = Cy.colors.subtle)
                             searchNote?.let { Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
                             places.forEach { pl ->
+                                Hairline()
                                 Text(
                                     pl.label, maxLines = 2, overflow = TextOverflow.Ellipsis,
                                     style = MaterialTheme.typography.bodyMedium,
@@ -219,9 +223,8 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                                         centred = true
                                         places = emptyList()
                                         query = ""
-                                    }.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    }.padding(horizontal = 14.dp, vertical = 12.dp),
                                 )
-                                HorizontalDivider()
                             }
                         }
                     }
@@ -229,14 +232,21 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
             }
         }
 
-        Surface(tonalElevation = 2.dp) {
+        Sheet {
             Column(
-                Modifier.fillMaxWidth().heightIn(max = 350.dp).verticalScroll(rememberScrollState()).padding(14.dp),
+                Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
                 val hint = "Long-press the map or search above"
+                val showResults = vm.options.isNotEmpty() && mode != PlanMode.PAST
                 val startText = vm.start?.label ?: if (myLoc != null) "My location" else "My location (waiting for GPS…)"
                 when (mode) {
-                    PlanMode.AB -> {
+                    PlanMode.AB -> if (showResults) {
+                        PlanSummary(
+                            "Route", startText.substringBefore(",") + "  →  " + (vm.end?.label?.substringBefore(",") ?: "") +
+                                if (vm.vias.isNotEmpty()) "  (${vm.vias.size} stop${if (vm.vias.size > 1) "s" else ""})" else "",
+                        ) { vm.options = emptyList() }
+                    } else {
                         StopRow(
                             Color(0xFF2E7D32), "Start", startText, pick == Pick.START,
                             onSelect = { vm.pick = Pick.START },
@@ -275,13 +285,15 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                             Spacer(Modifier.weight(1f))
                             TextButton({ vm.clearPlan() }) { Text("Clear") }
                         }
-                        Button(
-                            { vm.findRoutes(abPoints) },
+                        CyButton(
+                            if (vm.options.isEmpty()) "Find routes" else "Find again", { vm.findRoutes(abPoints) },
+                            Modifier.fillMaxWidth(), if (vm.options.isEmpty()) Btn.PRIMARY else Btn.SECONDARY,
                             enabled = startPt != null && vm.end != null && !vm.busy,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (vm.options.isEmpty()) "Find routes" else "Find again") }
+                        )
                     }
-                    PlanMode.LOOP -> {
+                    PlanMode.LOOP -> if (showResults) {
+                        PlanSummary("Loops", "From ${startText.substringBefore(",")}") { vm.options = emptyList() }
+                    } else {
                         StopRow(
                             Color(0xFF2E7D32), "Start and finish", startText, true, onSelect = {},
                             onClear = if (vm.start != null) ({ vm.start = null; vm.options = emptyList() }) else null,
@@ -293,22 +305,35 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Spacer(Modifier.height(8.dp))
-                        Text("Distance: about ${vm.loopKm.roundToInt()} km", fontWeight = FontWeight.SemiBold)
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            SectionLabel("Distance", Modifier.weight(1f).padding(bottom = 6.dp))
+                            Text("${vm.loopKm.roundToInt()}", style = MaterialTheme.typography.displaySmall)
+                            Text(
+                                " km", style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 5.dp),
+                            )
+                        }
                         Slider(
                             value = vm.loopKm,
                             onValueChange = { vm.loopKm = ((it / 5f).roundToInt() * 5f).coerceIn(5f, 200f) },
                             valueRange = 5f..200f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                inactiveTrackColor = Cy.colors.border,
+                            ),
                         )
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("5 km", style = MaterialTheme.typography.labelSmall)
                             Text("200 km", style = MaterialTheme.typography.labelSmall)
                         }
                         Spacer(Modifier.height(6.dp))
-                        Button(
+                        CyButton(
+                            if (vm.options.isEmpty()) "Suggest loops" else "Suggest again",
                             { startPt?.let { vm.findLoops(it) } },
+                            Modifier.fillMaxWidth(), if (vm.options.isEmpty()) Btn.PRIMARY else Btn.SECONDARY,
                             enabled = startPt != null && !vm.busy,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) { Text(if (vm.options.isEmpty()) "Suggest loops" else "Suggest again") }
+                        )
                     }
                     PlanMode.PAST -> PastRides(vm, metas.sortedBy { m ->
                         if (myLoc == null) 0.0 else Geo.dist(myLoc.lat, myLoc.lon, m.startLat, m.startLon)
@@ -321,7 +346,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                 if (mode != PlanMode.PAST) {
                     if (vm.busy) {
                         Spacer(Modifier.height(10.dp))
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        LinearProgressIndicator(Modifier.fillMaxWidth(), color = Cy.colors.accent, trackColor = Cy.colors.subtle)
                         Text(
                             "Working out routes…", style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(top = 4.dp),
@@ -330,35 +355,41 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                     vm.error?.let {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Couldn't find a route: $it", color = MaterialTheme.colorScheme.error,
+                            "Couldn't find a route: $it", color = Cy.colors.danger,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
                     if (vm.options.isNotEmpty()) {
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(12.dp))
                         Row(
                             Modifier.horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             vm.options.forEachIndexed { i, o ->
                                 val sel = i == vm.selected
-                                OutlinedCard(
-                                    onClick = { vm.selected = i },
-                                    border = BorderStroke(
-                                        if (sel) 2.dp else 1.dp,
-                                        if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                    ),
-                                ) {
-                                    Column(Modifier.padding(12.dp).width(140.dp)) {
-                                        Text(o.label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(Fmt.km(o.distanceM), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                                        Text("↑ ${o.ascentM.toInt()} m · ${Fmt.dur(o.timeS)}", style = MaterialTheme.typography.bodySmall)
-                                        Text(
-                                            o.tags.joinToString(" · ").ifEmpty { " " },
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary, maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
+                                Column(
+                                    Modifier.width(156.dp).clip(RoundedCornerShape(12.dp))
+                                        .background(if (sel) Cy.colors.accentSoft else Color.Transparent)
+                                        .border(
+                                            if (sel) 1.5.dp else 1.dp,
+                                            if (sel) Cy.colors.accent else Cy.colors.border, RoundedCornerShape(12.dp),
                                         )
+                                        .clickable { vm.selected = i }.padding(12.dp),
+                                ) {
+                                    Text(
+                                        o.label.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(Fmt.km(o.distanceM), style = MaterialTheme.typography.titleLarge.tabular)
+                                    Text(
+                                        "↑ ${o.ascentM.toInt()} m · ${Fmt.dur(o.timeS)}",
+                                        style = MaterialTheme.typography.bodySmall.tabular,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        DifficultyTag(com.cycler.app.data.Difficulty.of(o.distanceM, o.ascentM))
+                                        o.tags.firstOrNull()?.let { Tag(it) }
                                     }
                                 }
                             }
@@ -368,8 +399,8 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                             ElevationChart(option.pts)
                             Spacer(Modifier.height(10.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Button({ showSave = true }, Modifier.weight(1f)) { Text("Save route") }
-                                OutlinedButton({ vm.rideSelected() }, Modifier.weight(1f)) { Text("Ride it now") }
+                                CyButton("Ride it now", { vm.rideSelected() }, Modifier.weight(1f))
+                                CyButton("Save route", { showSave = true }, Modifier.weight(1f), Btn.SECONDARY)
                             }
                         }
                     }
@@ -388,6 +419,18 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
     }
 }
 
+/** Shown above the results in place of the editor, so the routes stay in view. */
+@Composable
+private fun PlanSummary(title: String, value: String, onEdit: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            SectionLabel(title)
+            Text(value, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        CyButton("Edit", onEdit, kind = Btn.SECONDARY, height = 36.dp)
+    }
+}
+
 /** One line of the trip: a coloured dot, what it is, and the chosen place. */
 @Composable
 private fun StopRow(
@@ -396,7 +439,7 @@ private fun StopRow(
 ) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(MaterialTheme.shapes.medium)
-            .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .background(if (active) Cy.colors.accentSoft else Color.Transparent)
             .clickable(onClick = onSelect).padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -437,8 +480,8 @@ private fun PastRides(
         ElevationChart(shown.pts)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button({ vm.guide = shown; vm.tab = Tab.RIDE }, Modifier.weight(1f)) { Text("Ride it") }
-            OutlinedButton({
+            CyButton("Ride it", { vm.follow(shown); vm.tab = Tab.RIDE }, Modifier.weight(1f))
+            CyButton("Save reversed", {
                 scope.launch {
                     val id = withContext(Dispatchers.IO) {
                         val pts = shown.pts.reversed().map { it.copy(t = 0L) }
@@ -450,12 +493,12 @@ private fun PastRides(
                     }
                     vm.detailId = id
                 }
-            }, Modifier.weight(1f)) { Text("Save reversed") }
+            }, Modifier.weight(1f), Btn.SECONDARY)
         }
         TextButton({ onShow(null) }) { Text("Back to list") }
         return
     }
-    Text("Your saved routes, nearest first", style = MaterialTheme.typography.labelMedium)
+    SectionLabel("Your saved routes, nearest first")
     metas.forEach { m ->
         Row(
             Modifier.fillMaxWidth().clickable {
@@ -478,6 +521,6 @@ private fun PastRides(
                 )
             }
         }
-        HorizontalDivider()
+        Hairline()
     }
 }

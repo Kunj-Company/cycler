@@ -17,11 +17,15 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.speech.tts.TextToSpeech
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.cycler.app.MainActivity
 import com.cycler.app.data.Geo
+import com.cycler.app.data.Prefs
 import com.cycler.app.data.Pt
 import com.cycler.app.data.RouteStore
 import com.cycler.app.data.RouteType
@@ -43,6 +47,14 @@ data class TrackState(
     val activeMs: Long = 0,
     val resumedAt: Long = 0,
     val speedMs: Float = 0f,
+    val maxSpeedMs: Float = 0f,
+    /** Standing still while recording; the moving clock is stopped. */
+    val autoPaused: Boolean = false,
+    /** Metres away from the route being followed, or null when not following one. */
+    val guideOffM: Double? = null,
+    /** How far along the followed route the rider is, metres. */
+    val guideDoneM: Double = 0.0,
+    val offRoute: Boolean = false,
     /** Set once a ride has been saved, so the UI can open it. */
     val savedId: String? = null,
 ) {
@@ -60,6 +72,14 @@ class TrackingService : Service(), LocationListener {
     private var lastFix: Location? = null
     private var skipNextSegment = false
     private var lastNotify = 0L
+    private var stillSince = 0L
+    private var autoPauseOn = true
+    private var offRouteAlertOn = true
+    private var offCount = 0
+    private var guideHint = 0
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var lastSpokenKm = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -98,6 +118,16 @@ class TrackingService : Service(), LocationListener {
         RouteStore.get(this).recordingFile.delete()
         lastFix = null
         skipNextSegment = false
+        stillSince = 0L
+        offCount = 0
+        guideHint = 0
+        lastSpokenKm = 0
+        val prefs = Prefs(this)
+        autoPauseOn = prefs.autoPause
+        offRouteAlertOn = prefs.offRouteAlert
+        if (prefs.voice) {
+            tts = TextToSpeech(applicationContext) { status -> ttsReady = status == TextToSpeech.SUCCESS }
+        }
         state.value = TrackState(status = TrackStatus.RECORDING, resumedAt = System.currentTimeMillis())
     }
 
@@ -105,7 +135,7 @@ class TrackingService : Service(), LocationListener {
         val now = System.currentTimeMillis()
         state.update {
             if (it.status != TrackStatus.RECORDING) it
-            else it.copy(status = TrackStatus.PAUSED, activeMs = it.elapsedMs(now), speedMs = 0f)
+            else it.copy(status = TrackStatus.PAUSED, activeMs = it.elapsedMs(now), speedMs = 0f, autoPaused = false)
         }
         notify("Paused")
     }
@@ -113,6 +143,7 @@ class TrackingService : Service(), LocationListener {
     private fun resume() {
         lastFix = null
         skipNextSegment = true
+        stillSince = 0L
         state.update {
             if (it.status != TrackStatus.PAUSED) it
             else it.copy(status = TrackStatus.RECORDING, resumedAt = System.currentTimeMillis())
@@ -124,6 +155,9 @@ class TrackingService : Service(), LocationListener {
         lm.removeUpdates(this)
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
+        runCatching { tts?.shutdown() }
+        tts = null
+        ttsReady = false
         var id: String? = null
         val store = RouteStore.get(this)
         if (save && s.points.size >= 2) {
@@ -135,6 +169,8 @@ class TrackingService : Service(), LocationListener {
                 distanceM = s.distanceM,
                 ascentM = Geo.ascent(s.points, 4.0, smooth = true),
                 createdAt = s.points.first().t,
+                maxSpeedMs = s.maxSpeedMs.toDouble(),
+                elapsedS = s.elapsedMs(System.currentTimeMillis()) / 1000,
             )
         }
         store.recordingFile.delete()
@@ -172,13 +208,56 @@ class TrackingService : Service(), LocationListener {
                 )
             }
         }
+        // Auto-pause: a few seconds below walking pace counts as stopped.
+        if (speed < 0.8f) {
+            if (stillSince == 0L) stillSince = loc.time
+        } else stillSince = 0L
+        val paused = autoPauseOn && stillSince != 0L && loc.time - stillSince >= 4000
+
+        // Following a route: how far off it are we, and how far along?
+        var off: Double? = null
+        var done = s.guideDoneM
+        var offRoute = s.offRoute
+        val g = guide
+        val gc = guideCum
+        if (g != null && gc != null && g.size >= 2) {
+            val (d, along, idx) = Geo.nearestOnRoute(pt, g, gc, guideHint)
+            off = d
+            if (d <= 60.0) { guideHint = idx; done = along }
+            if (d > 50.0) offCount++ else if (d < 30.0) offCount = 0
+            val nowOff = offCount >= 3
+            if (nowOff && !offRoute && offRouteAlertOn) buzz(longArrayOf(0, 350, 150, 350, 150, 350))
+            if (!nowOff && offRoute && offRouteAlertOn) buzz(longArrayOf(0, 120))
+            offRoute = nowOff
+        } else {
+            offRoute = false
+            offCount = 0
+        }
+
         state.update {
             it.copy(
                 points = if (keep) it.points + pt else it.points,
                 distanceM = it.distanceM + addDist,
                 movingMs = it.movingMs + movingAdd,
-                speedMs = speed,
+                speedMs = if (paused) 0f else speed,
+                maxSpeedMs = if (loc.hasSpeed() && speed < 28f) maxOf(it.maxSpeedMs, speed) else it.maxSpeedMs,
+                autoPaused = paused,
+                guideOffM = off,
+                guideDoneM = done,
+                offRoute = offRoute,
             )
+        }
+
+        // Spoken update at every whole kilometre, if switched on.
+        val st = state.value
+        val km = (st.distanceM / 1000).toInt()
+        if (km > lastSpokenKm) {
+            lastSpokenKm = km
+            if (ttsReady && st.movingMs > 0) {
+                val avg = st.distanceM / (st.movingMs / 1000.0) * 3.6
+                val text = String.format(Locale.US, "%d kilometres. Average %.0f kilometres per hour.", km, avg)
+                runCatching { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "km$km") }
+            }
         }
         val now = System.currentTimeMillis()
         if (now - lastNotify > 5000) {
@@ -195,7 +274,16 @@ class TrackingService : Service(), LocationListener {
     override fun onDestroy() {
         runCatching { lm.removeUpdates(this) }
         wakeLock?.let { if (it.isHeld) it.release() }
+        runCatching { tts?.shutdown() }
         super.onDestroy()
+    }
+
+    private fun buzz(pattern: LongArray) {
+        runCatching {
+            @Suppress("DEPRECATION")
+            val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            v.vibrate(VibrationEffect.createWaveform(pattern, -1))
+        }
     }
 
     private fun notify(text: String) {
@@ -234,6 +322,17 @@ class TrackingService : Service(), LocationListener {
         private const val NOTIF_ID = 1
 
         val state = MutableStateFlow(TrackState())
+
+        /** The route being followed, if any. Set by the UI; read on every GPS fix. */
+        @Volatile var guide: List<Pt>? = null
+            private set
+        @Volatile private var guideCum: DoubleArray? = null
+
+        fun setGuide(pts: List<Pt>?) {
+            guideCum = pts?.let { Geo.cumulative(it) }
+            guide = pts
+            state.update { it.copy(guideOffM = null, guideDoneM = 0.0, offRoute = false) }
+        }
 
         fun send(ctx: Context, action: String, name: String? = null) {
             val i = Intent(ctx, TrackingService::class.java).setAction(action)

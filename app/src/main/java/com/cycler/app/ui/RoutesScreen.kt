@@ -3,6 +3,7 @@ package com.cycler.app.ui
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,37 +14,30 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.automirrored.filled.DirectionsBike
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -52,26 +46,59 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cycler.app.MainVm
 import com.cycler.app.Tab
+import com.cycler.app.data.Difficulty
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Gpx
+import com.cycler.app.data.Pt
 import com.cycler.app.data.Route
 import com.cycler.app.data.RouteType
-import com.cycler.app.net.BRouter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** One line of a route list: outline, name, numbers. */
 @Composable
-fun RoutesScreen(vm: MainVm, myLoc: com.cycler.app.data.Pt?) {
+fun RouteRow(
+    thumb: List<Pt>, recorded: Boolean, title: String, stats: String, note: String?,
+    difficulty: Difficulty, onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RouteThumb(thumb, Modifier.size(56.dp), if (recorded) MaterialTheme.colorScheme.onSurface else Cy.colors.accent)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(stats, style = MaterialTheme.typography.bodyMedium.tabular, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                DifficultyTag(difficulty)
+                if (note != null) {
+                    Text(
+                        note, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
+        }
+        Icon(
+            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val metas by vm.store.metas.collectAsState()
-    var filter by remember { mutableStateOf<RouteType?>(null) }
+    var filter by remember { mutableIntStateOf(0) }
 
     val importGpx = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -98,105 +125,92 @@ fun RoutesScreen(vm: MainVm, myLoc: com.cycler.app.data.Pt?) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Routes", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            TextButton({ importGpx.launch(arrayOf("*/*")) }) { Text("Import GPX") }
+    val shown = metas.filter {
+        when (filter) {
+            1 -> it.type == RouteType.RECORDED
+            2 -> it.type == RouteType.PLANNED
+            else -> true
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(filter == null, { filter = null }, { Text("All") })
-            FilterChip(filter == RouteType.RECORDED, { filter = RouteType.RECORDED }, { Text("Rides") })
-            FilterChip(filter == RouteType.PLANNED, { filter = RouteType.PLANNED }, { Text("Planned") })
+    }
+
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
+        item(key = "head") {
+            Column {
+                Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Routes", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                    TextButton({ importGpx.launch(arrayOf("*/*")) }) {
+                        Text("Import GPX", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                CyButton(
+                    when {
+                        myLoc == null -> "Waiting for your location…"
+                        vm.suggestBusy -> "Finding routes…"
+                        vm.suggestions.isEmpty() -> "Suggest routes near me"
+                        else -> "Suggest different routes"
+                    },
+                    { myLoc?.let { vm.suggestNearby(it) } },
+                    Modifier.fillMaxWidth(), Btn.SECONDARY, Icons.Outlined.Explore,
+                    enabled = myLoc != null && !vm.suggestBusy,
+                )
+                if (vm.suggestBusy) {
+                    LinearProgressIndicator(
+                        Modifier.fillMaxWidth().padding(top = 10.dp),
+                        color = Cy.colors.accent, trackColor = Cy.colors.subtle,
+                    )
+                    Text(
+                        "Short, medium and long loops from where you are.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+                vm.suggestError?.let {
+                    Text(
+                        "Couldn't suggest routes: $it", color = Cy.colors.danger,
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                if (vm.suggestions.isNotEmpty()) {
+                    SectionLabel("Suggested from here", Modifier.padding(top = 22.dp, bottom = 2.dp))
+                }
+            }
         }
-        val shown = metas.filter { filter == null || it.type == filter }
-        if (shown.isEmpty() && vm.suggestions.isEmpty() && !vm.suggestBusy) {
-            Text(
-                "Nothing saved yet. Record a ride from the Ride tab or plan one from the Plan tab.",
-                Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        itemsIndexed(vm.suggestions) { i, o ->
+            val thumb = remember(o) { Geo.simplify(o.pts) }
+            RouteRow(
+                thumb, false, o.label.replaceFirstChar { it.uppercase() },
+                "${Fmt.km(o.distanceM)} · ↑ ${o.ascentM.toInt()} m · ${Fmt.dur(o.timeS)}",
+                "Tap to preview", Difficulty.of(o.distanceM, o.ascentM),
+            ) { vm.openSuggestion(i) }
+            Hairline()
         }
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 10.dp),
-        ) {
-            item(key = "suggest") {
-                Column {
-                    Button(
-                        { myLoc?.let { vm.suggestNearby(it) } },
-                        enabled = myLoc != null && !vm.suggestBusy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            when {
-                                myLoc == null -> "Waiting for your location…"
-                                vm.suggestions.isEmpty() -> "Suggest routes near me"
-                                else -> "Suggest different routes"
-                            }
-                        )
-                    }
-                    if (vm.suggestBusy) {
-                        LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp))
-                        Text(
-                            "Finding short, medium and long loops from where you are…",
-                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                    vm.suggestError?.let {
-                        Text(
-                            "Couldn't suggest routes: $it", color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp),
-                        )
-                    }
-                    if (vm.suggestions.isNotEmpty()) {
-                        Text(
-                            "Suggested from your location", style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(top = 12.dp),
-                        )
-                    }
+        item(key = "saved-head") {
+            Column {
+                SectionLabel("Saved", Modifier.padding(top = 22.dp, bottom = 10.dp))
+                Segmented(listOf("All", "Rides", "Planned"), filter, { filter = it }, Modifier.fillMaxWidth())
+                if (shown.isEmpty()) {
+                    Text(
+                        when (filter) {
+                            1 -> "No rides recorded yet. Press Start on the Ride tab and your ride lands here."
+                            2 -> "No planned routes yet. Build one in the Plan tab, or save a suggestion."
+                            else -> "Nothing saved yet. Recorded rides and planned routes will appear here."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 20.dp),
+                    )
                 }
+                Spacer(Modifier.height(4.dp))
             }
-            itemsIndexed(vm.suggestions) { i, o ->
-                OutlinedCard(onClick = { vm.openSuggestion(i) }, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(o.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                "${Fmt.km(o.distanceM)} · ↑ ${o.ascentM.toInt()} m · about ${Fmt.dur(o.timeS)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                        Text("Preview", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-            if (vm.suggestions.isNotEmpty() && shown.isNotEmpty()) {
-                item(key = "saved-header") {
-                    Text("Saved", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
-                }
-            }
-            items(shown, key = { it.id }) { m ->
-                Card(onClick = { vm.detailId = m.id }, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (m.type == RouteType.RECORDED) Icons.AutoMirrored.Filled.DirectionsBike else Icons.Filled.Route,
-                            contentDescription = if (m.type == RouteType.RECORDED) "Recorded ride" else "Planned route",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(m.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(
-                                "${Fmt.km(m.distanceM)} · ↑ ${m.ascentM.toInt()} m · ${Fmt.dur(m.durationS)}",
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                Fmt.date(m.createdAt), style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
+        }
+        items(shown, key = { it.id }) { m ->
+            RouteRow(
+                m.thumb, m.type == RouteType.RECORDED, m.name,
+                "${Fmt.km(m.distanceM)} · ↑ ${m.ascentM.toInt()} m · ${Fmt.dur(m.durationS)}",
+                Fmt.day(m.createdAt), m.difficulty,
+            ) { vm.detailId = m.id }
+            Hairline()
         }
     }
 }
@@ -224,60 +238,75 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
         }
     }
 
-    Surface(Modifier.fillMaxSize()) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton({ vm.detailId = null }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton({ vm.detailId = null }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
                 Text(
                     meta?.name ?: "Route", style = MaterialTheme.typography.titleLarge,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                 )
-                IconButton({ rename = true }) { Icon(Icons.Filled.Edit, "Rename") }
-                IconButton({ confirmDelete = true }) { Icon(Icons.Filled.Delete, "Delete") }
+                IconButton({ rename = true }) { Icon(Icons.Outlined.Edit, "Rename", Modifier.size(20.dp)) }
+                IconButton({ confirmDelete = true }) { Icon(Icons.Outlined.DeleteOutline, "Delete", Modifier.size(22.dp)) }
             }
             val r = route
+            val recorded = meta?.type == RouteType.RECORDED
             val lines = remember(r) {
                 listOfNotNull(r?.let { MapLine(it.pts, if (it.meta.type == RouteType.RECORDED) COLOR_TRACK else COLOR_ROUTE, 5f) })
             }
             val dots = remember(r) {
                 if (r == null || r.pts.isEmpty()) emptyList()
-                else listOf(MapDot(r.pts.first(), "#2E7D32", 7f), MapDot(r.pts.last(), "#D32F2F", 7f))
+                else listOf(MapDot(r.pts.first(), "#2F7D4F", 7f), MapDot(r.pts.last(), "#D4403A", 7f))
             }
             val camera = remember(r) { r?.let { CameraCmd(it.pts) } }
             CyclerMap(
                 Modifier.weight(1f).fillMaxWidth(), vm.mapStyle, lines, dots, camera,
-                initial = meta?.let { com.cycler.app.data.Pt(it.startLat, it.startLon) },
+                initial = meta?.let { Pt(it.startLat, it.startLon) },
             )
             if (meta != null) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        Stat("distance", Fmt.km(meta.distanceM))
-                        Stat("climb", "${meta.ascentM.toInt()} m")
-                        Stat(if (meta.type == RouteType.RECORDED) "moving time" else "est. time", Fmt.dur(meta.durationS))
-                        if (meta.type == RouteType.RECORDED && meta.durationS > 0) {
-                            Stat("avg km/h", Fmt.kmh(meta.distanceM / meta.durationS))
+                Sheet {
+                    Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Tag(if (recorded) "Ride" else "Planned")
+                            DifficultyTag(meta.difficulty)
+                            Text(
+                                Fmt.date(meta.createdAt), style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
-                    }
-                    Text(
-                        (if (meta.type == RouteType.RECORDED) "Ridden " else "Planned ") + Fmt.date(meta.createdAt),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    if (r != null) {
-                        Spacer(Modifier.height(10.dp))
-                        ElevationChart(r.pts)
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            { vm.guide = r; vm.detailId = null; vm.tab = Tab.RIDE },
-                            enabled = r != null, modifier = Modifier.weight(1f),
-                        ) { Text("Ride this route") }
-                        OutlinedButton(
-                            { export.launch(meta.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "route" } + ".gpx") },
-                            enabled = r != null, modifier = Modifier.weight(1f),
-                        ) { Text("Export GPX") }
+                        Spacer(Modifier.height(14.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Metric("Distance", Fmt.kmShort(meta.distanceM), unit = "km")
+                            Metric("Climb", "${meta.ascentM.toInt()}", unit = "m")
+                            Metric(if (recorded) "Moving" else "Est. time", Fmt.dur(meta.durationS))
+                            if (recorded && meta.durationS > 0) {
+                                Metric("Avg", Fmt.kmh(meta.distanceM / meta.durationS), unit = "km/h")
+                            }
+                        }
+                        if (recorded && (meta.maxSpeedMs > 0 || meta.elapsedS > 0)) {
+                            Spacer(Modifier.height(12.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp)) {
+                                if (meta.maxSpeedMs > 0) Metric("Max", Fmt.kmh(meta.maxSpeedMs), unit = "km/h")
+                                if (meta.elapsedS > 0) Metric("Elapsed", Fmt.dur(meta.elapsedS))
+                            }
+                        }
+                        if (r != null) {
+                            Spacer(Modifier.height(16.dp))
+                            ElevationChart(r.pts)
+                        }
+                        Spacer(Modifier.height(16.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CyButton(
+                                if (recorded) "Ride again" else "Ride this route",
+                                { vm.follow(r); vm.detailId = null; vm.tab = Tab.RIDE },
+                                Modifier.weight(1f), icon = Icons.Outlined.PlayArrow, enabled = r != null,
+                            )
+                            CyButton(
+                                "Export GPX",
+                                { export.launch(meta.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "route" } + ".gpx") },
+                                Modifier.weight(1f), Btn.SECONDARY, enabled = r != null,
+                            )
+                        }
                     }
                 }
             }
@@ -290,69 +319,20 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete this route?") },
+            shape = RadiusLarge,
+            title = { Text("Delete this route?", style = MaterialTheme.typography.titleLarge) },
             text = { Text("It will be removed from this phone for good.") },
             confirmButton = {
                 TextButton({
                     confirmDelete = false
-                    if (vm.guide?.meta?.id == id) vm.guide = null
+                    if (vm.guide?.meta?.id == id) vm.follow(null)
                     vm.detailId = null
                     vm.store.delete(id)
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete", color = Cy.colors.danger) }
             },
-            dismissButton = { TextButton({ confirmDelete = false }) { Text("Cancel") } },
+            dismissButton = {
+                TextButton({ confirmDelete = false }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            },
         )
-    }
-}
-
-@Composable
-fun SettingsScreen(vm: MainVm) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-        Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-
-        Text("Bike type", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 18.dp))
-        Text(
-            "Decides which roads and tracks route planning prefers.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        BRouter.profiles.forEach { (key, label) ->
-            Choice(label, vm.profile == key) { vm.profile = key; vm.prefs.profile = key }
-        }
-
-        Text("Map style", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 18.dp))
-        MapStyles.all.forEach { (key, label) ->
-            Choice(label, vm.mapStyle == key) { vm.mapStyle = key; vm.prefs.mapStyle = key }
-        }
-
-        Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Keep screen on while riding", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Recording continues with the screen off either way.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Switch(vm.keepScreenOn, { vm.keepScreenOn = it; vm.prefs.keepScreenOn = it })
-        }
-
-        Text("About", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
-        Text(
-            "Cycler keeps everything on this phone: no account, no cloud. " +
-                "Maps and routing need an internet connection; recording a ride does not.\n\n" +
-                "Map data © OpenStreetMap contributors. Map tiles by OpenFreeMap and CyclOSM. " +
-                "Routing and elevation by BRouter. Place search by Photon (Komoot).",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().selectable(selected = selected, onClick = onClick).padding(vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Text(label)
     }
 }

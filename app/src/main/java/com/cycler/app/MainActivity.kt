@@ -4,34 +4,39 @@ import android.Manifest
 import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Color as AColor
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmarks
-import androidx.compose.material.icons.automirrored.filled.DirectionsBike
-import androidx.compose.material.icons.filled.Route
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
+import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -40,10 +45,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -56,9 +62,14 @@ import com.cycler.app.data.RouteMeta
 import com.cycler.app.data.RouteStore
 import com.cycler.app.data.RouteType
 import com.cycler.app.net.BRouter
+import com.cycler.app.net.Weather
 import com.cycler.app.track.TrackStatus
 import com.cycler.app.track.TrackingService
 import com.cycler.app.track.locationFlow
+import com.cycler.app.ui.ActivityScreen
+import com.cycler.app.ui.Cy
+import com.cycler.app.ui.CyclerTheme
+import com.cycler.app.ui.Hairline
 import com.cycler.app.ui.PlanScreen
 import com.cycler.app.ui.RideScreen
 import com.cycler.app.ui.RouteDetailScreen
@@ -81,10 +92,10 @@ class CyclerApp : Application() {
 }
 
 enum class Tab(val label: String, val icon: ImageVector) {
-    RIDE("Ride", Icons.AutoMirrored.Filled.DirectionsBike),
-    PLAN("Plan", Icons.Filled.Route),
-    ROUTES("Routes", Icons.Filled.Bookmarks),
-    SETTINGS("Settings", Icons.Filled.Settings),
+    RIDE("Ride", Icons.AutoMirrored.Outlined.DirectionsBike),
+    PLAN("Plan", Icons.Outlined.Route),
+    ROUTES("Routes", Icons.Outlined.BookmarkBorder),
+    ACTIVITY("Activity", Icons.Outlined.BarChart),
 }
 
 enum class PlanMode(val label: String) { AB("A to B"), LOOP("Loop"), PAST("My rides") }
@@ -112,6 +123,37 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     var detailId by mutableStateOf<String?>(null)
     /** A saved route shown on the Ride screen to follow while recording. */
     var guide by mutableStateOf<Route?>(null)
+        private set
+    var showSettings by mutableStateOf(false)
+
+    var themeMode by mutableStateOf(prefs.themeMode)
+    var autoPause by mutableStateOf(prefs.autoPause)
+    var offRouteAlert by mutableStateOf(prefs.offRouteAlert)
+    var voice by mutableStateOf(prefs.voice)
+    var weeklyGoalKm by mutableIntStateOf(prefs.weeklyGoalKm)
+
+    var weather by mutableStateOf<Weather.Now?>(null)
+        internal set
+    private var weatherAt: Pt? = null
+    private var weatherTime = 0L
+
+    /** Follow [route] on the Ride screen (null stops following). */
+    fun follow(route: Route?) {
+        guide = route
+        TrackingService.setGuide(route?.pts)
+    }
+
+    /** Fetch the weather, at most every 15 minutes unless the rider has moved far. */
+    fun refreshWeather(at: Pt) {
+        val now = System.currentTimeMillis()
+        val moved = weatherAt?.let { Geo.dist(it, at) > 5000 } ?: true
+        if (!moved && now - weatherTime < 15 * 60_000) return
+        weatherAt = at
+        weatherTime = now
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { runCatching { Weather.now(at) }.getOrNull() }?.let { weather = it }
+        }
+    }
 
     var profile by mutableStateOf(prefs.profile)
     var mapStyle by mutableStateOf(prefs.mapStyle)
@@ -254,7 +296,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             "", o.label, RouteType.PLANNED, System.currentTimeMillis(), o.distanceM, o.ascentM, o.timeS,
             o.pts.first().lat, o.pts.first().lon,
         )
-        guide = Route(meta, o.pts)
+        follow(Route(meta, o.pts))
         tab = Tab.RIDE
     }
 
@@ -305,24 +347,54 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { CyclerTheme { App() } }
+        setContent {
+            val vm: MainVm = viewModel()
+            CyclerTheme(vm.themeMode) {
+                // Status and navigation bar icons follow the app's theme, not just the system's.
+                val dark = Cy.colors.isDark
+                DisposableEffect(dark) {
+                    val style = if (dark) SystemBarStyle.dark(AColor.TRANSPARENT)
+                    else SystemBarStyle.light(AColor.TRANSPARENT, AColor.TRANSPARENT)
+                    enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+                    onDispose {}
+                }
+                App(vm)
+            }
+        }
     }
 }
 
 @Composable
-fun CyclerTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val ctx = LocalContext.current
-    val scheme = when {
-        Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        dark -> darkColorScheme(primary = Color(0xFF81C784))
-        else -> lightColorScheme(primary = Color(0xFF2E7D32))
+fun BottomBar(tab: Tab, onSelect: (Tab) -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.surface) {
+        Column {
+            Hairline()
+            Row(Modifier.fillMaxWidth().navigationBarsPadding().height(60.dp)) {
+                Tab.entries.forEach { t ->
+                    val sel = t == tab
+                    val color = if (sel) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(
+                        Modifier.weight(1f).fillMaxSize().clickable(
+                            interactionSource = remember { MutableInteractionSource() }, indication = null,
+                        ) { onSelect(t) },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+                    ) {
+                        Icon(t.icon, contentDescription = null, tint = color, modifier = Modifier.size(22.dp))
+                        Text(
+                            t.label, color = color, modifier = Modifier.padding(top = 3.dp),
+                            style = if (sel) MaterialTheme.typography.labelMedium.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+                            else MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+            }
+        }
     }
-    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 @Composable
-fun App(vm: MainVm = viewModel()) {
+fun App(vm: MainVm) {
     val ctx = LocalContext.current
     var granted by remember { mutableStateOf(hasLocationPermission(ctx)) }
     val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -339,6 +411,7 @@ fun App(vm: MainVm = viewModel()) {
         if (granted) locationFlow(ctx).collect {
             value = it
             vm.prefs.lastLoc = it
+            vm.refreshWeather(it)
         }
     }
 
@@ -348,27 +421,26 @@ fun App(vm: MainVm = viewModel()) {
         RouteDetailScreen(vm, detail)
         return
     }
+    if (vm.showSettings) {
+        BackHandler { vm.showSettings = false }
+        SettingsScreen(vm)
+        return
+    }
+    AppShell(vm, myLoc, granted, request)
+}
 
+@Composable
+fun AppShell(vm: MainVm, myLoc: Pt?, granted: Boolean, request: () -> Unit) {
     Scaffold(
-        bottomBar = {
-            NavigationBar {
-                Tab.entries.forEach { t ->
-                    NavigationBarItem(
-                        selected = vm.tab == t,
-                        onClick = { vm.tab = t },
-                        icon = { Icon(t.icon, contentDescription = null) },
-                        label = { Text(t.label) },
-                    )
-                }
-            }
-        },
+        bottomBar = { BottomBar(vm.tab) { vm.tab = it } },
+        containerColor = MaterialTheme.colorScheme.background,
     ) { pad ->
         Box(Modifier.fillMaxSize().padding(pad)) {
             when (vm.tab) {
                 Tab.RIDE -> RideScreen(vm, myLoc, granted, request)
                 Tab.PLAN -> PlanScreen(vm, myLoc)
                 Tab.ROUTES -> RoutesScreen(vm, myLoc)
-                Tab.SETTINGS -> SettingsScreen(vm)
+                Tab.ACTIVITY -> ActivityScreen(vm)
             }
         }
     }

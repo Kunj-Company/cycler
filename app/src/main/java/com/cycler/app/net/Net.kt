@@ -87,3 +87,51 @@ object Photon {
         return out
     }
 }
+
+/** Current weather by Open-Meteo (https://open-meteo.com) — free, no key. */
+object Weather {
+    class Now(
+        val tempC: Double,
+        val windKmh: Double,
+        val gustKmh: Double,
+        /** Direction the wind comes from, degrees. */
+        val windFromDeg: Double,
+        /** Highest chance of rain over the next three hours, percent. */
+        val rainChance: Int,
+        val code: Int,
+    ) {
+        val windFrom: String
+            get() = listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[(((windFromDeg % 360 + 360) % 360 + 22.5) / 45).toInt() % 8]
+        val summary: String
+            get() = when (code) {
+                0 -> "Clear"
+                1, 2 -> "Partly cloudy"
+                3 -> "Cloudy"
+                45, 48 -> "Fog"
+                in 51..57 -> "Drizzle"
+                in 61..67, in 80..82 -> "Rain"
+                in 71..77, 85, 86 -> "Snow"
+                in 95..99 -> "Thunderstorm"
+                else -> "—"
+            }
+    }
+
+    fun now(at: Pt): Now {
+        val url = String.format(
+            Locale.US,
+            "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f" +
+                "&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code" +
+                "&hourly=precipitation_probability&forecast_hours=3&timezone=auto",
+            at.lat, at.lon,
+        )
+        val o = JSONObject(httpGet(url, 15000))
+        val c = o.getJSONObject("current")
+        val probs = o.optJSONObject("hourly")?.optJSONArray("precipitation_probability")
+        var rain = 0
+        if (probs != null) for (i in 0 until probs.length()) rain = maxOf(rain, probs.optInt(i, 0))
+        return Now(
+            c.getDouble("temperature_2m"), c.getDouble("wind_speed_10m"), c.optDouble("wind_gusts_10m", 0.0),
+            c.optDouble("wind_direction_10m", 0.0), rain, c.optInt("weather_code", -1),
+        )
+    }
+}

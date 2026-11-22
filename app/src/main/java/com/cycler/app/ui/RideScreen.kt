@@ -1,5 +1,7 @@
 package com.cycler.app.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,28 +11,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Air
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SmallFloatingActionButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -38,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
@@ -46,33 +46,45 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cycler.app.MainVm
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Pt
+import com.cycler.app.net.Weather
+import com.cycler.app.track.TrackState
 import com.cycler.app.track.TrackStatus
 import com.cycler.app.track.TrackingService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 
-const val COLOR_TRACK = "#E53935"
-const val COLOR_GUIDE = "#7E57C2"
-const val COLOR_ROUTE = "#1565C0"
-const val COLOR_ALT = "#90A4AE"
-const val COLOR_ME = "#1E88E5"
+const val COLOR_TRACK = "#E5484D"
+const val COLOR_GUIDE = "#2563EB"
+const val COLOR_ROUTE = "#2563EB"
+const val COLOR_ALT = "#9A9A95"
+const val COLOR_ME = "#1C1C1A"
 
 @Composable
-fun NameDialog(title: String, initial: String, confirm: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
-    var name by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = { OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }) },
-        confirmButton = { TextButton({ onConfirm(name.trim()) }) { Text(confirm) } },
-        dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
-    )
+fun WeatherChip(w: Weather.Now, modifier: Modifier = Modifier) {
+    MapChip(modifier) {
+        Text("${w.tempC.toInt()}°", style = MaterialTheme.typography.labelLarge.tabular)
+        Spacer(Modifier.width(10.dp))
+        Icon(Icons.Outlined.Air, "Wind", Modifier.size(15.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(4.dp))
+        Text(
+            "${w.windKmh.toInt()} km/h ${w.windFrom}", style = MaterialTheme.typography.labelLarge.tabular,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (w.rainChance >= 20) {
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Rain ${w.rainChance}%", style = MaterialTheme.typography.labelLarge.tabular,
+                color = if (w.rainChance >= 50) Cy.colors.warn else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable
 fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -> Unit) {
     val ctx = LocalContext.current
     val st by TrackingService.state.collectAsStateWithLifecycle()
+    val metas by vm.store.metas.collectAsState()
     var follow by remember { mutableStateOf(vm.guide == null) }
     var zoomed by remember { mutableStateOf(false) }
     var camera by remember { mutableStateOf<CameraCmd?>(null) }
@@ -96,7 +108,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
     LaunchedEffect(st.savedId) {
         val id = st.savedId ?: return@LaunchedEffect
         TrackingService.state.update { it.copy(savedId = null) }
-        vm.guide = null
+        vm.follow(null)
         vm.detailId = id
     }
     val view = LocalView.current
@@ -112,8 +124,12 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
             if (st.points.size >= 2) add(MapLine(st.points, COLOR_TRACK, 5f))
         }
     }
-    val dots = remember(here) { listOfNotNull(here?.let { MapDot(it, COLOR_ME, 8f) }) }
-    val climb = remember(st.points.size / 10) { Geo.ascent(st.points, 4.0, smooth = true) }
+    val dots = remember(here, guide) {
+        buildList {
+            guide?.pts?.lastOrNull()?.let { add(MapDot(it, "#D4403A", 6f)) }
+            here?.let { add(MapDot(it, COLOR_ME, 8f)) }
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         CyclerMap(
@@ -122,87 +138,48 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
             onUserMove = { follow = false },
         )
 
-        if (guide != null) {
-            Surface(
-                Modifier.align(Alignment.TopCenter).padding(12.dp),
-                shape = MaterialTheme.shapes.large, tonalElevation = 3.dp, shadowElevation = 3.dp,
-            ) {
-                Row(Modifier.padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Following: ${guide.meta.name} · ${Fmt.km(guide.meta.distanceM)}",
-                        style = MaterialTheme.typography.labelLarge, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(12.dp)) {
+            vm.weather?.let { WeatherChip(it) }
+            if (guide != null) {
+                Spacer(Modifier.height(8.dp))
+                MapChip(Modifier.fillMaxWidth()) {
+                    StatusDot(Cy.colors.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(guide.meta.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            if (active) "${Fmt.km((guide.meta.distanceM - st.guideDoneM).coerceAtLeast(0.0))} to go"
+                            else "${Fmt.km(guide.meta.distanceM)} · ↑ ${guide.meta.ascentM.toInt()} m",
+                            style = MaterialTheme.typography.bodySmall.tabular,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Icon(
+                        Icons.Outlined.Close, "Stop following",
+                        Modifier.size(20.dp).clip(Radius).clickable { vm.follow(null) },
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    IconButton({ vm.guide = null }) { Icon(Icons.Filled.Close, "Stop following") }
                 }
             }
         }
 
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(12.dp)) {
-            SmallFloatingActionButton(
-                onClick = { follow = true; zoomed = false },
-                modifier = Modifier.align(Alignment.End),
-            ) { Icon(Icons.Filled.MyLocation, "Centre on me") }
-            Spacer(Modifier.height(8.dp))
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            MapChip(Modifier.align(Alignment.End).padding(12.dp), onClick = { follow = true; zoomed = false }) {
+                Icon(
+                    Icons.Outlined.MyLocation, "Centre on me", Modifier.size(20.dp),
+                    tint = if (follow) Cy.colors.accent else MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Sheet {
+                Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
                     if (!active) {
-                        if (!granted) {
-                            Text("Cycler needs your location to show where you are and record rides.")
-                            Spacer(Modifier.height(8.dp))
-                            Button(requestPermission, Modifier.fillMaxWidth()) { Text("Allow location") }
-                        } else {
-                            Button(
-                                onClick = {
-                                    follow = true
-                                    zoomed = false
-                                    TrackingService.send(ctx, TrackingService.ACTION_START)
-                                },
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                            ) {
-                                Icon(Icons.Filled.PlayArrow, null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Start ride")
-                            }
+                        IdlePanel(vm, metas.filter { it.type == com.cycler.app.data.RouteType.RECORDED }, granted, requestPermission) {
+                            follow = true
+                            zoomed = false
+                            TrackingService.send(ctx, TrackingService.ACTION_START)
                         }
                     } else {
-                        val avg = if (st.movingMs > 0) st.distanceM / (st.movingMs / 1000.0) else 0.0
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            Stat("km", Fmt.kmNumber(st.distanceM), big = true)
-                            Stat(if (st.status == TrackStatus.PAUSED) "paused" else "time", Fmt.clock(st.elapsedMs(now)), big = true)
-                            Stat("km/h", Fmt.kmh(st.speedMs.toDouble()), big = true)
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            Stat("avg km/h", Fmt.kmh(avg))
-                            Stat("moving", Fmt.clock(st.movingMs))
-                            Stat("climb", "${climb.toInt()} m")
-                        }
-                        if (st.points.isEmpty()) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                "Waiting for a GPS fix… best under open sky.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (st.status == TrackStatus.RECORDING) {
-                                FilledTonalButton(
-                                    { TrackingService.send(ctx, TrackingService.ACTION_PAUSE) },
-                                    Modifier.weight(1f).height(48.dp),
-                                ) { Icon(Icons.Filled.Pause, null); Spacer(Modifier.width(6.dp)); Text("Pause") }
-                            } else {
-                                FilledTonalButton(
-                                    { TrackingService.send(ctx, TrackingService.ACTION_RESUME) },
-                                    Modifier.weight(1f).height(48.dp),
-                                ) { Icon(Icons.Filled.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Resume") }
-                            }
-                            Button({ showFinish = true }, Modifier.weight(1f).height(48.dp)) {
-                                Icon(Icons.Filled.Stop, null); Spacer(Modifier.width(6.dp)); Text("Finish")
-                            }
-                        }
+                        RecordingPanel(vm, st, now, onFinish = { showFinish = true })
                     }
                 }
             }
@@ -213,29 +190,154 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
         var name by remember { mutableStateOf(Fmt.rideName()) }
         AlertDialog(
             onDismissRequest = { showFinish = false },
-            title = { Text("Finish ride") },
+            shape = RadiusLarge,
+            title = { Text("Finish ride", style = MaterialTheme.typography.titleLarge) },
             text = {
                 Column {
-                    Text("${Fmt.km(st.distanceM)} in ${Fmt.clock(st.movingMs)} moving")
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") })
+                    Text(
+                        "${Fmt.km(st.distanceM)} · ${Fmt.clock(st.movingMs)} moving",
+                        style = MaterialTheme.typography.bodyMedium.tabular,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(14.dp))
+                    OutlinedTextField(name, { name = it }, singleLine = true, label = { Text("Name") }, shape = Radius)
                 }
             },
             confirmButton = {
                 TextButton({
                     showFinish = false
                     TrackingService.send(ctx, TrackingService.ACTION_STOP, name.trim().ifBlank { "Ride" })
-                }) { Text("Save") }
+                }) { Text("Save ride") }
             },
             dismissButton = {
                 Row {
                     TextButton({
                         showFinish = false
                         TrackingService.send(ctx, TrackingService.ACTION_DISCARD)
-                    }) { Text("Discard", color = MaterialTheme.colorScheme.error) }
-                    TextButton({ showFinish = false }) { Text("Keep riding") }
+                    }) { Text("Discard", color = Cy.colors.danger) }
+                    TextButton({ showFinish = false }) { Text("Keep riding", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun IdlePanel(
+    vm: MainVm, rides: List<com.cycler.app.data.RouteMeta>, granted: Boolean,
+    requestPermission: () -> Unit, onStart: () -> Unit,
+) {
+    if (!granted) {
+        Text("Turn on location", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "Cycler uses your location to show where you are and to record rides. It stays on this phone.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+        )
+        CyButton("Allow location", requestPermission, Modifier.fillMaxWidth(), height = 52.dp)
+        return
+    }
+    val weekKm = remember(rides) { Stats.since(rides, Stats.weekStart()).distanceM / 1000 }
+    val goal = vm.weeklyGoalKm
+    Row(verticalAlignment = Alignment.Bottom) {
+        Column(Modifier.weight(1f)) {
+            SectionLabel("This week")
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(String.format(java.util.Locale.US, "%.1f", weekKm), style = MaterialTheme.typography.displaySmall)
+                Text(
+                    " / $goal km", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 5.dp),
+                )
+            }
+        }
+        if (weekKm >= goal) Tag("Goal reached", Cy.colors.success, filled = true)
+    }
+    Spacer(Modifier.height(8.dp))
+    Progress((weekKm / goal).toFloat(), color = if (weekKm >= goal) Cy.colors.success else Cy.colors.accent)
+    Spacer(Modifier.height(16.dp))
+    CyButton(
+        if (vm.guide != null) "Start and follow route" else "Start ride", onStart,
+        Modifier.fillMaxWidth(), icon = Icons.Filled.PlayArrow, height = 52.dp,
+    )
+}
+
+@Composable
+private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onFinish: () -> Unit) {
+    val ctx = LocalContext.current
+    val paused = st.status == TrackStatus.PAUSED
+    val avg = if (st.movingMs > 0) st.distanceM / (st.movingMs / 1000.0) else 0.0
+    val climb = remember(st.points.size / 10) { Geo.ascent(st.points, 4.0, smooth = true) }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        StatusDot(
+            when {
+                paused -> MaterialTheme.colorScheme.onSurfaceVariant
+                st.autoPaused -> Cy.colors.warn
+                else -> Cy.colors.danger
+            }
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            when {
+                paused -> "Paused"
+                st.points.isEmpty() -> "Waiting for GPS"
+                st.autoPaused -> "Auto-paused"
+                else -> "Recording"
+            },
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            "Elapsed ${Fmt.clock(st.elapsedMs(now))}", style = MaterialTheme.typography.labelMedium.tabular,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (st.offRoute) {
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(Radius).background(Cy.colors.danger.copy(alpha = 0.10f)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Off route · ${st.guideOffM?.toInt() ?: 0} m away", style = MaterialTheme.typography.labelLarge,
+                color = Cy.colors.danger,
+            )
+        }
+    }
+
+    Spacer(Modifier.height(12.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+        Metric("Distance", Fmt.kmNumber(st.distanceM), Modifier.weight(1f), unit = "km", hero = true)
+        Metric("Speed", Fmt.kmh(st.speedMs.toDouble()), unit = "km/h", hero = true, alignment = Alignment.End)
+    }
+    Spacer(Modifier.height(12.dp))
+    Hairline()
+    Spacer(Modifier.height(12.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Metric(if (vm.autoPause) "Moving" else "Time", Fmt.clock(if (vm.autoPause) st.movingMs else st.elapsedMs(now)))
+        Metric("Avg", Fmt.kmh(avg), unit = "km/h")
+        Metric("Max", Fmt.kmh(st.maxSpeedMs.toDouble()), unit = "km/h")
+        Metric("Climb", "${climb.toInt()}", unit = "m")
+    }
+    val g = vm.guide
+    if (g != null && g.meta.distanceM > 0) {
+        Spacer(Modifier.height(12.dp))
+        Progress((st.guideDoneM / g.meta.distanceM).toFloat())
+    }
+    Spacer(Modifier.height(16.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (paused) {
+            CyButton(
+                "Resume", { TrackingService.send(ctx, TrackingService.ACTION_RESUME) },
+                Modifier.weight(1f), Btn.SECONDARY, Icons.Filled.PlayArrow, height = 52.dp,
+            )
+        } else {
+            CyButton(
+                "Pause", { TrackingService.send(ctx, TrackingService.ACTION_PAUSE) },
+                Modifier.weight(1f), Btn.SECONDARY, Icons.Filled.Pause, height = 52.dp,
+            )
+        }
+        CyButton("Finish", onFinish, Modifier.weight(1f), Btn.PRIMARY, Icons.Filled.Stop, height = 52.dp)
     }
 }

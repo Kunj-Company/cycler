@@ -25,7 +25,18 @@ class RouteStore private constructor(ctx: Context) {
     @Synchronized
     fun reload() {
         val list = dir.listFiles { f -> f.name.endsWith(".meta.json") }.orEmpty().mapNotNull { f ->
-            runCatching { metaFromJson(JSONObject(f.readText())) }.getOrNull()
+            runCatching {
+                var m = metaFromJson(JSONObject(f.readText()))
+                if (m.thumb.isEmpty()) {
+                    // Routes saved by an older version: add the outline once.
+                    val pts = readPoints(m.id)
+                    if (pts.size >= 2) {
+                        m = m.copy(thumb = Geo.simplify(pts))
+                        f.writeText(metaToJson(m).toString())
+                    }
+                }
+                m
+            }.getOrNull()
         }
         _metas.value = list.sortedByDescending { it.createdAt }
     }
@@ -36,11 +47,14 @@ class RouteStore private constructor(ctx: Context) {
         distanceM: Double = Geo.length(pts),
         ascentM: Double = Geo.ascent(pts),
         createdAt: Long = System.currentTimeMillis(),
+        maxSpeedMs: Double = 0.0,
+        elapsedS: Long = 0,
     ): String {
         val id = UUID.randomUUID().toString()
         val meta = RouteMeta(
             id, name.ifBlank { "Untitled" }, type, createdAt, distanceM, ascentM, durationS,
             pts.firstOrNull()?.lat ?: 0.0, pts.firstOrNull()?.lon ?: 0.0,
+            maxSpeedMs, elapsedS, Geo.simplify(pts),
         )
         val arr = JSONArray()
         for (p in pts) {
@@ -57,8 +71,13 @@ class RouteStore private constructor(ctx: Context) {
 
     fun load(id: String): Route? {
         val meta = _metas.value.firstOrNull { it.id == id } ?: return null
+        val pts = readPoints(id)
+        return if (pts.isEmpty()) null else Route(meta, pts)
+    }
+
+    private fun readPoints(id: String): List<Pt> {
         val f = File(dir, "$id.pts.json")
-        if (!f.exists()) return null
+        if (!f.exists()) return emptyList()
         return runCatching {
             val arr = JSONArray(f.readText())
             val pts = ArrayList<Pt>(arr.length())
@@ -66,8 +85,8 @@ class RouteStore private constructor(ctx: Context) {
                 val a = arr.getJSONArray(i)
                 pts.add(Pt(a.getDouble(0), a.getDouble(1), a.optDouble(2, Double.NaN), a.optLong(3, 0L)))
             }
-            Route(meta, pts)
-        }.getOrNull()
+            pts
+        }.getOrDefault(emptyList())
     }
 
     @Synchronized
@@ -108,15 +127,24 @@ class RouteStore private constructor(ctx: Context) {
         .put("createdAt", m.createdAt).put("distanceM", m.distanceM)
         .put("ascentM", m.ascentM).put("durationS", m.durationS)
         .put("startLat", m.startLat).put("startLon", m.startLon)
+        .put("maxSpeedMs", m.maxSpeedMs).put("elapsedS", m.elapsedS)
+        .put("thumb", JSONArray().also { arr -> m.thumb.forEach { arr.put(JSONArray().put(it.lat).put(it.lon)) } })
 
     private fun metaFromJson(o: JSONObject) = RouteMeta(
         o.getString("id"), o.getString("name"), RouteType.valueOf(o.getString("type")),
         o.getLong("createdAt"), o.getDouble("distanceM"), o.getDouble("ascentM"),
         o.getLong("durationS"), o.optDouble("startLat", 0.0), o.optDouble("startLon", 0.0),
+        o.optDouble("maxSpeedMs", 0.0), o.optLong("elapsedS", 0L),
+        o.optJSONArray("thumb")?.let { arr ->
+            (0 until arr.length()).map { i -> arr.getJSONArray(i).let { Pt(it.getDouble(0), it.getDouble(1)) } }
+        } ?: emptyList(),
     )
 
     companion object {
         @Volatile private var inst: RouteStore? = null
+        /** For tests only: forget the shared instance so the next get() starts clean. */
+        internal fun resetForTests() { inst = null }
+
         fun get(ctx: Context): RouteStore =
             inst ?: synchronized(this) { inst ?: RouteStore(ctx.applicationContext).also { inst = it } }
     }
@@ -134,6 +162,22 @@ class Prefs(ctx: Context) {
     var keepScreenOn: Boolean
         get() = sp.getBoolean("keepScreenOn", true)
         set(v) = sp.edit().putBoolean("keepScreenOn", v).apply()
+    /** "system", "light" or "dark". */
+    var themeMode: String
+        get() = sp.getString("themeMode", "system")!!
+        set(v) = sp.edit().putString("themeMode", v).apply()
+    var autoPause: Boolean
+        get() = sp.getBoolean("autoPause", true)
+        set(v) = sp.edit().putBoolean("autoPause", v).apply()
+    var offRouteAlert: Boolean
+        get() = sp.getBoolean("offRouteAlert", true)
+        set(v) = sp.edit().putBoolean("offRouteAlert", v).apply()
+    var voice: Boolean
+        get() = sp.getBoolean("voice", false)
+        set(v) = sp.edit().putBoolean("voice", v).apply()
+    var weeklyGoalKm: Int
+        get() = sp.getInt("weeklyGoalKm", 50)
+        set(v) = sp.edit().putInt("weeklyGoalKm", v).apply()
     var lastLoc: Pt?
         get() = if (sp.contains("lastLat")) Pt(sp.getFloat("lastLat", 0f).toDouble(), sp.getFloat("lastLon", 0f).toDouble()) else null
         set(v) {

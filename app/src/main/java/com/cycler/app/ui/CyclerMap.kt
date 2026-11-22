@@ -9,9 +9,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -106,6 +110,11 @@ fun CyclerMap(
     onLongPress: ((Pt) -> Unit)? = null,
     onUserMove: (() -> Unit)? = null,
 ) {
+    if (LocalInspectionMode.current) {
+        // Previews and screenshot tests can't run the real map engine; sketch the content instead.
+        MapPlaceholder(modifier, lines, dots)
+        return
+    }
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val padPx = with(LocalDensity.current) { 56.dp.roundToPx() }
@@ -214,4 +223,37 @@ fun CyclerMap(
     }
 
     AndroidView(factory = { mapView }, modifier = modifier)
+}
+
+@Composable
+private fun MapPlaceholder(modifier: Modifier, lines: List<MapLine>, dots: List<MapDot>) {
+    val dark = Cy.colors.isDark
+    androidx.compose.foundation.Canvas(
+        modifier.background(if (dark) Color(0xFF20242A) else Color(0xFFE9ECE6))
+    ) {
+        val all = lines.flatMap { it.pts } + dots.map { it.pt }
+        val road = if (dark) Color(0xFF2C3138) else Color(0xFFF7F8F5)
+        for (i in 1..7) {
+            drawLine(road, Offset(0f, size.height * i / 8f), Offset(size.width, size.height * i / 8f - 60f), 10f)
+            drawLine(road, Offset(size.width * i / 8f, 0f), Offset(size.width * i / 8f + 40f, size.height), 10f)
+        }
+        if (all.isEmpty()) return@Canvas
+        val minLat = all.minOf { it.lat }; val maxLat = all.maxOf { it.lat }
+        val minLon = all.minOf { it.lon }; val maxLon = all.maxOf { it.lon }
+        val w = (maxLon - minLon).coerceAtLeast(1e-4); val h = (maxLat - minLat).coerceAtLeast(1e-4)
+        val scale = minOf(size.width * 0.7 / w, size.height * 0.5 / h)
+        fun pos(p: Pt) = Offset(
+            (size.width / 2 + (p.lon - (minLon + maxLon) / 2) * scale).toFloat(),
+            (size.height * 0.38 - (p.lat - (minLat + maxLat) / 2) * scale).toFloat(),
+        )
+        for (l in lines) {
+            val path = androidx.compose.ui.graphics.Path()
+            l.pts.forEachIndexed { i, p -> val o = pos(p); if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y) }
+            drawPath(path, Color(android.graphics.Color.parseColor(l.color)), style = androidx.compose.ui.graphics.drawscope.Stroke(l.width * 2.6f))
+        }
+        for (d in dots) {
+            drawCircle(Color.White, d.radius * 2.6f + 6f, pos(d.pt))
+            drawCircle(Color(android.graphics.Color.parseColor(d.color)), d.radius * 2.6f, pos(d.pt))
+        }
+    }
 }

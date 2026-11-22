@@ -23,7 +23,31 @@ data class RouteMeta(
     val durationS: Long,
     val startLat: Double,
     val startLon: Double,
-)
+    val maxSpeedMs: Double = 0.0,
+    /** Total time from start to finish, including stops. Seconds. 0 when unknown. */
+    val elapsedS: Long = 0,
+    /** A few dozen points for drawing a small outline of the route. */
+    val thumb: List<Pt> = emptyList(),
+) {
+    val difficulty: Difficulty get() = Difficulty.of(distanceM, ascentM)
+}
+
+/** A rough effort label: every 40 m of climbing counts like one extra kilometre. */
+enum class Difficulty(val label: String) {
+    EASY("Easy"), MODERATE("Moderate"), HARD("Hard"), EPIC("Very hard");
+
+    companion object {
+        fun of(distanceM: Double, ascentM: Double): Difficulty {
+            val effort = distanceM / 1000 + ascentM / 40
+            return when {
+                effort < 20 -> EASY
+                effort < 50 -> MODERATE
+                effort < 95 -> HARD
+                else -> EPIC
+            }
+        }
+    }
+}
 
 data class Route(val meta: RouteMeta, val pts: List<Pt>)
 
@@ -83,6 +107,54 @@ object Geo {
             else if (ref - e >= threshold) ref = e
         }
         return gain
+    }
+
+    /** Up to [n] evenly spaced points, enough to sketch the shape of a route. */
+    fun simplify(pts: List<Pt>, n: Int = 48): List<Pt> {
+        if (pts.size <= n) return pts.map { Pt(it.lat, it.lon) }
+        return (0 until n).map { i -> pts[i * (pts.size - 1) / (n - 1)].let { Pt(it.lat, it.lon) } }
+    }
+
+    /**
+     * Where [p] sits relative to a route: distance from the route in metres and
+     * how far along it the nearest spot is. [cum] holds the distance from the
+     * start to each route point. Searches near [hint] first for speed.
+     */
+    fun nearestOnRoute(p: Pt, route: List<Pt>, cum: DoubleArray, hint: Int): Triple<Double, Double, Int> {
+        fun scan(from: Int, to: Int): Triple<Double, Double, Int> {
+            var best = Double.MAX_VALUE
+            var along = 0.0
+            var idx = from
+            val kx = 111320.0 * cos(rad(p.lat))
+            val ky = 110540.0
+            for (i in from until to) {
+                val a = route[i]
+                val b = route[i + 1]
+                val ax = (a.lon - p.lon) * kx
+                val ay = (a.lat - p.lat) * ky
+                val bx = (b.lon - p.lon) * kx
+                val by = (b.lat - p.lat) * ky
+                val dx = bx - ax
+                val dy = by - ay
+                val len2 = dx * dx + dy * dy
+                val t = if (len2 == 0.0) 0.0 else (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
+                val cx = ax + t * dx
+                val cy = ay + t * dy
+                val d = sqrt(cx * cx + cy * cy)
+                if (d < best) { best = d; along = cum[i] + t * (cum[i + 1] - cum[i]); idx = i }
+            }
+            return Triple(best, along, idx)
+        }
+        if (route.size < 2) return Triple(Double.MAX_VALUE, 0.0, 0)
+        val last = route.size - 1
+        val near = scan(maxOf(0, hint - 15), minOf(last, hint + 150))
+        return if (near.first <= 60.0) near else scan(0, last)
+    }
+
+    fun cumulative(pts: List<Pt>): DoubleArray {
+        val out = DoubleArray(pts.size)
+        for (i in 1 until pts.size) out[i] = out[i - 1] + dist(pts[i - 1], pts[i])
+        return out
     }
 
     /**
