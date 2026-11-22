@@ -99,7 +99,21 @@ object Weather {
         /** Highest chance of rain over the next three hours, percent. */
         val rainChance: Int,
         val code: Int,
+        /** Today's sunset, epoch millis, or 0 when unknown. */
+        val sunsetMs: Long = 0,
     ) {
+        /** Travelling on [bearingDeg]: is this wind against, behind or across? Null when too light to matter. */
+        fun feel(bearingDeg: Double): String? {
+            if (windKmh < 8) return null
+            val diff = Math.abs(((bearingDeg - windFromDeg) % 360 + 540) % 360 - 180)
+            val kind = when {
+                diff < 50 -> "Headwind"
+                diff > 130 -> "Tailwind"
+                else -> "Crosswind"
+            }
+            return "$kind ${windKmh.toInt()} km/h"
+        }
+
         val windFrom: String
             get() = listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[(((windFromDeg % 360 + 360) % 360 + 22.5) / 45).toInt() % 8]
         val summary: String
@@ -121,7 +135,7 @@ object Weather {
             Locale.US,
             "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f" +
                 "&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code" +
-                "&hourly=precipitation_probability&forecast_hours=3&timezone=auto",
+                "&hourly=precipitation_probability&forecast_hours=3&daily=sunset&forecast_days=1&timezone=auto",
             at.lat, at.lon,
         )
         val o = JSONObject(httpGet(url, 15000))
@@ -129,9 +143,13 @@ object Weather {
         val probs = o.optJSONObject("hourly")?.optJSONArray("precipitation_probability")
         var rain = 0
         if (probs != null) for (i in 0 until probs.length()) rain = maxOf(rain, probs.optInt(i, 0))
+        val sunset = runCatching {
+            val iso = o.getJSONObject("daily").getJSONArray("sunset").getString(0)
+            java.time.LocalDateTime.parse(iso).atZone(java.time.ZoneId.of(o.getString("timezone"))).toInstant().toEpochMilli()
+        }.getOrDefault(0L)
         return Now(
             c.getDouble("temperature_2m"), c.getDouble("wind_speed_10m"), c.optDouble("wind_gusts_10m", 0.0),
-            c.optDouble("wind_direction_10m", 0.0), rain, c.optInt("weather_code", -1),
+            c.optDouble("wind_direction_10m", 0.0), rain, c.optInt("weather_code", -1), sunset,
         )
     }
 }

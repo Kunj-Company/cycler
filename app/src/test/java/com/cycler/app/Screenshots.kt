@@ -74,7 +74,7 @@ class Screenshots {
             )
         }
         vm.store.save("To Lalbagh Botanical Garden", RouteType.PLANNED, loop(9.0, 11), 1800, 9000.0, 48.0)
-        vm.weather = Weather.Now(27.4, 9.3, 25.0, 49.0, 30, 2)
+        vm.weather = Weather.Now(27.4, 12.3, 25.0, 49.0, 30, 2, System.currentTimeMillis() + 70 * 60_000)
         TrackingService.state.value = TrackState()
         TrackingService.setGuide(null)
     }

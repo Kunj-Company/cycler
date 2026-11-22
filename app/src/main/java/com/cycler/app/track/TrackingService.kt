@@ -17,6 +17,8 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.media.AudioAttributes
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.speech.tts.TextToSpeech
@@ -55,6 +57,12 @@ data class TrackState(
     /** How far along the followed route the rider is, metres. */
     val guideDoneM: Double = 0.0,
     val offRoute: Boolean = false,
+    /** Length of the followed route, measured the same way as [guideDoneM]. */
+    val guideTotalM: Double = 0.0,
+    /** Location is switched off on the phone, so nothing can be recorded. */
+    val gpsOff: Boolean = false,
+    /** A one-off message for the rider, e.g. why a ride could not start. */
+    val notice: String? = null,
     /** Set once a ride has been saved, so the UI can open it. */
     val savedId: String? = null,
 ) {
@@ -76,10 +84,11 @@ class TrackingService : Service(), LocationListener {
     private var autoPauseOn = true
     private var offRouteAlertOn = true
     private var offCount = 0
-    private var guideHint = 0
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var lastSpokenKm = 0
+    /** Off-route alerts only start once the rider has actually been on the route. */
+    private var onRouteSeen = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -91,11 +100,13 @@ class TrackingService : Service(), LocationListener {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> begin()
-            ACTION_PAUSE -> pause()
-            ACTION_RESUME -> resume()
-            ACTION_STOP -> finish(intent.getStringExtra(EXTRA_NAME), save = true)
-            ACTION_DISCARD -> finish(null, save = false)
-            else -> if (state.value.status == TrackStatus.IDLE) stopSelf()
+            // The other actions only make sense while a ride is running.
+            else -> if (state.value.status == TrackStatus.IDLE) stopSelf() else when (intent?.action) {
+                ACTION_PAUSE -> pause()
+                ACTION_RESUME -> resume()
+                ACTION_STOP -> finish(intent.getStringExtra(EXTRA_NAME), save = true)
+                ACTION_DISCARD -> finish(null, save = false)
+            }
         }
         return START_NOT_STICKY
     }
@@ -109,26 +120,46 @@ class TrackingService : Service(), LocationListener {
             if (state.value.status != TrackStatus.IDLE) return
             lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())
         } catch (e: Exception) {
-            // No location permission or GPS hardware: nothing to record.
+            // No precise-location permission or no GPS: nothing to record. Tell the rider why.
+            state.update { it.copy(notice = "Couldn't start: Cycler needs precise location. Check the app's location permission.") }
+            runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
             stopSelf()
             return
         }
-        wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "cycler:record").apply { acquire() }
+        acquireWakeLock()
         RouteStore.get(this).recordingFile.delete()
+        onRouteSeen = false
         lastFix = null
         skipNextSegment = false
         stillSince = 0L
         offCount = 0
-        guideHint = 0
         lastSpokenKm = 0
         val prefs = Prefs(this)
         autoPauseOn = prefs.autoPause
         offRouteAlertOn = prefs.offRouteAlert
         if (prefs.voice) {
-            tts = TextToSpeech(applicationContext) { status -> ttsReady = status == TextToSpeech.SUCCESS }
+            tts = TextToSpeech(applicationContext) { status ->
+                ttsReady = status == TextToSpeech.SUCCESS &&
+                    runCatching { (tts?.setLanguage(Locale.US) ?: -2) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
+            }
         }
-        state.value = TrackState(status = TrackStatus.RECORDING, resumedAt = System.currentTimeMillis())
+        state.value = TrackState(
+            status = TrackStatus.RECORDING, resumedAt = System.currentTimeMillis(),
+            guideTotalM = guideCum?.lastOrNull() ?: 0.0,
+            gpsOff = !runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(true),
+        )
+    }
+
+    @SuppressLint("WakelockTimeout")
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "cycler:record").apply { acquire() }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
     }
 
     private fun pause() {
@@ -137,10 +168,19 @@ class TrackingService : Service(), LocationListener {
             if (it.status != TrackStatus.RECORDING) it
             else it.copy(status = TrackStatus.PAUSED, activeMs = it.elapsedMs(now), speedMs = 0f, autoPaused = false)
         }
+        // No GPS or wake lock while paused: a long cafe stop shouldn't drain the battery.
+        runCatching { lm.removeUpdates(this) }
+        releaseWakeLock()
         notify("Paused")
     }
 
+    @SuppressLint("MissingPermission")
     private fun resume() {
+        if (state.value.status != TrackStatus.PAUSED) return
+        runCatching {
+            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())
+        }
+        acquireWakeLock()
         lastFix = null
         skipNextSegment = true
         stillSince = 0L
@@ -152,15 +192,16 @@ class TrackingService : Service(), LocationListener {
 
     private fun finish(name: String?, save: Boolean) {
         val s = state.value
-        lm.removeUpdates(this)
-        wakeLock?.let { if (it.isHeld) it.release() }
-        wakeLock = null
+        runCatching { lm.removeUpdates(this) }
+        releaseWakeLock()
         runCatching { tts?.shutdown() }
         tts = null
         ttsReady = false
         var id: String? = null
+        var notice: String? = null
         val store = RouteStore.get(this)
-        if (save && s.points.size >= 2) {
+        if (save && s.points.size < 2) notice = "Too short to save: no distance was recorded."
+        if (save && s.points.size >= 2) try {
             id = store.save(
                 name = name ?: "Ride",
                 type = RouteType.RECORDED,
@@ -172,9 +213,12 @@ class TrackingService : Service(), LocationListener {
                 maxSpeedMs = s.maxSpeedMs.toDouble(),
                 elapsedS = s.elapsedMs(System.currentTimeMillis()) / 1000,
             )
+        } catch (e: Exception) {
+            // Keep the raw recording so the ride can be recovered on the next launch.
+            notice = "Couldn't save the ride just now. It will be recovered next time you open Cycler."
         }
-        store.recordingFile.delete()
-        state.value = TrackState(savedId = id)
+        if (id != null || !save || s.points.size < 2) store.recordingFile.delete()
+        state.value = TrackState(savedId = id, notice = notice)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -197,8 +241,9 @@ class TrackingService : Service(), LocationListener {
         val pt = Pt(loc.latitude, loc.longitude, if (loc.hasAltitude()) loc.altitude else Double.NaN, loc.time)
         val last = s.points.lastOrNull()
         val gap = if (last == null) 0.0 else Geo.dist(last, pt)
-        // Only keep a new point after moving a few metres, so standing still adds no fake distance.
-        val keep = last == null || gap >= 4.0
+        // Only keep a new point after really moving: GPS wanders several metres while you
+        // stand at a signal, and that must not count as distance.
+        val keep = last == null || (gap >= 4.0 && speed >= 0.5f) || gap >= 15.0
         val addDist = if (keep && !skipNextSegment) gap else 0.0
         if (keep) {
             skipNextSegment = false
@@ -221,11 +266,13 @@ class TrackingService : Service(), LocationListener {
         val g = guide
         val gc = guideCum
         if (g != null && gc != null && g.size >= 2) {
-            val (d, along, idx) = Geo.nearestOnRoute(pt, g, gc, guideHint)
+            val (d, along, _) = Geo.nearestOnRoute(pt, g, gc, done)
             off = d
-            if (d <= 60.0) { guideHint = idx; done = along }
+            if (d <= 60.0) done = along
+            if (d < 30.0) onRouteSeen = true
             if (d > 50.0) offCount++ else if (d < 30.0) offCount = 0
-            val nowOff = offCount >= 3
+            // Riding to the start of a route is not "off route".
+            val nowOff = onRouteSeen && offCount >= 5
             if (nowOff && !offRoute && offRouteAlertOn) buzz(longArrayOf(0, 350, 150, 350, 150, 350))
             if (!nowOff && offRoute && offRouteAlertOn) buzz(longArrayOf(0, 120))
             offRoute = nowOff
@@ -240,7 +287,8 @@ class TrackingService : Service(), LocationListener {
                 distanceM = it.distanceM + addDist,
                 movingMs = it.movingMs + movingAdd,
                 speedMs = if (paused) 0f else speed,
-                maxSpeedMs = if (loc.hasSpeed() && speed < 28f) maxOf(it.maxSpeedMs, speed) else it.maxSpeedMs,
+                maxSpeedMs = if (speedTrusted(loc) && speed < 28f) maxOf(it.maxSpeedMs, speed) else it.maxSpeedMs,
+                gpsOff = false,
                 autoPaused = paused,
                 guideOffM = off,
                 guideDoneM = done,
@@ -268,13 +316,29 @@ class TrackingService : Service(), LocationListener {
 
     @Deprecated("Deprecated in Java")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-    override fun onProviderEnabled(provider: String) {}
-    override fun onProviderDisabled(provider: String) {}
+    override fun onProviderEnabled(provider: String) {
+        if (provider == LocationManager.GPS_PROVIDER) state.update { it.copy(gpsOff = false) }
+    }
+
+    override fun onProviderDisabled(provider: String) {
+        if (provider == LocationManager.GPS_PROVIDER && state.value.status != TrackStatus.IDLE) {
+            state.update { it.copy(gpsOff = true) }
+            notify("Location is off. Turn it on to keep recording.")
+        }
+    }
+
+    private fun speedTrusted(loc: Location): Boolean =
+        loc.hasSpeed() && (!loc.hasSpeedAccuracy() || loc.speedAccuracyMetersPerSecond < 1.5f)
 
     override fun onDestroy() {
         runCatching { lm.removeUpdates(this) }
-        wakeLock?.let { if (it.isHeld) it.release() }
+        releaseWakeLock()
         runCatching { tts?.shutdown() }
+        if (state.value.status != TrackStatus.IDLE) {
+            // The system ended the service mid-ride. Save what was recorded instead of leaving the UI frozen.
+            val id = runCatching { RouteStore.get(this).recoverUnfinished() }.getOrNull()
+            state.value = TrackState(savedId = id, notice = "Recording stopped unexpectedly. Your ride so far was saved.")
+        }
         super.onDestroy()
     }
 
@@ -282,7 +346,14 @@ class TrackingService : Service(), LocationListener {
         runCatching {
             @Suppress("DEPRECATION")
             val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            v.vibrate(VibrationEffect.createWaveform(pattern, -1))
+            val effect = VibrationEffect.createWaveform(pattern, -1)
+            // Marked as an alarm so it still fires with the screen off.
+            if (Build.VERSION.SDK_INT >= 33) {
+                v.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+            } else {
+                @Suppress("DEPRECATION")
+                v.vibrate(effect, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
+            }
         }
     }
 
@@ -306,6 +377,7 @@ class TrackingService : Service(), LocationListener {
             .setContentTitle("Cycler is recording your ride")
             .setContentText(text)
             .setOngoing(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
             .build()
@@ -331,7 +403,9 @@ class TrackingService : Service(), LocationListener {
         fun setGuide(pts: List<Pt>?) {
             guideCum = pts?.let { Geo.cumulative(it) }
             guide = pts
-            state.update { it.copy(guideOffM = null, guideDoneM = 0.0, offRoute = false) }
+            state.update {
+                it.copy(guideOffM = null, guideDoneM = 0.0, offRoute = false, guideTotalM = guideCum?.lastOrNull() ?: 0.0)
+            }
         }
 
         fun send(ctx: Context, action: String, name: String? = null) {
@@ -364,6 +438,7 @@ fun locationFlow(ctx: Context): Flow<Pt> = callbackFlow {
         .filter { runCatching { lm.allProviders.contains(it) }.getOrDefault(false) }
     try {
         providers.mapNotNull { lm.getLastKnownLocation(it) }.maxByOrNull { it.time }
+            ?.takeIf { System.currentTimeMillis() - it.time < 10 * 60_000 }
             ?.let { trySend(Pt(it.latitude, it.longitude, Double.NaN, it.time)) }
         for (p in providers) lm.requestLocationUpdates(p, 2000L, 2f, listener, Looper.getMainLooper())
     } catch (e: SecurityException) {

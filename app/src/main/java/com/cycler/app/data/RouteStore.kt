@@ -32,7 +32,7 @@ class RouteStore private constructor(ctx: Context) {
                     val pts = readPoints(m.id)
                     if (pts.size >= 2) {
                         m = m.copy(thumb = Geo.simplify(pts))
-                        f.writeText(metaToJson(m).toString())
+                        writeSafely(f, metaToJson(m).toString())
                     }
                 }
                 m
@@ -63,8 +63,8 @@ class RouteStore private constructor(ctx: Context) {
             a.put(p.t)
             arr.put(a)
         }
-        File(dir, "$id.pts.json").writeText(arr.toString())
-        File(dir, "$id.meta.json").writeText(metaToJson(meta).toString())
+        writeSafely(File(dir, "$id.pts.json"), arr.toString())
+        writeSafely(File(dir, "$id.meta.json"), metaToJson(meta).toString())
         reload()
         return id
     }
@@ -92,7 +92,7 @@ class RouteStore private constructor(ctx: Context) {
     @Synchronized
     fun rename(id: String, name: String) {
         val meta = _metas.value.firstOrNull { it.id == id } ?: return
-        File(dir, "$id.meta.json").writeText(metaToJson(meta.copy(name = name.ifBlank { meta.name })).toString())
+        writeSafely(File(dir, "$id.meta.json"), metaToJson(meta.copy(name = name.ifBlank { meta.name })).toString())
         reload()
     }
 
@@ -106,20 +106,37 @@ class RouteStore private constructor(ctx: Context) {
     /** If the app died mid-ride, turn the leftover points into a saved ride. */
     fun recoverUnfinished(): String? {
         if (!recordingFile.exists()) return null
-        val pts = runCatching {
-            recordingFile.readLines().mapNotNull { line ->
-                val p = line.split(',')
-                if (p.size < 4) null
-                else Pt(p[0].toDouble(), p[1].toDouble(), p[2].toDoubleOrNull() ?: Double.NaN, p[3].toLong())
-            }
-        }.getOrDefault(emptyList())
-        recordingFile.delete()
-        if (pts.size < 2) return null
+        // Read line by line: a half-written last line must not cost the whole ride.
+        val pts = runCatching { recordingFile.readLines() }.getOrDefault(emptyList()).mapNotNull { line ->
+            val p = line.split(',')
+            val lat = p.getOrNull(0)?.toDoubleOrNull()
+            val lon = p.getOrNull(1)?.toDoubleOrNull()
+            val t = p.getOrNull(3)?.trim()?.toLongOrNull()
+            if (lat == null || lon == null || t == null) null
+            else Pt(lat, lon, p.getOrNull(2)?.toDoubleOrNull() ?: Double.NaN, t)
+        }
+        if (pts.size < 2) {
+            recordingFile.delete()
+            return null
+        }
         val dur = ((pts.last().t - pts.first().t) / 1000).coerceAtLeast(0)
-        return save(
+        val id = save(
             "Recovered ride", RouteType.RECORDED, pts, dur,
-            ascentM = Geo.ascent(pts, 4.0, smooth = true), createdAt = pts.first().t,
+            ascentM = Geo.ascent(pts, 4.0, smooth = true), createdAt = pts.first().t, elapsedS = dur,
         )
+        // Only now is it safe to drop the raw recording.
+        recordingFile.delete()
+        return id
+    }
+
+    /** Write to a temporary file and swap it in, so a kill mid-write can't leave a broken file. */
+    private fun writeSafely(target: File, text: String) {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        tmp.writeText(text)
+        if (!tmp.renameTo(target)) {
+            target.writeText(text)
+            tmp.delete()
+        }
     }
 
     private fun metaToJson(m: RouteMeta) = JSONObject()
@@ -135,9 +152,11 @@ class RouteStore private constructor(ctx: Context) {
         o.getLong("createdAt"), o.getDouble("distanceM"), o.getDouble("ascentM"),
         o.getLong("durationS"), o.optDouble("startLat", 0.0), o.optDouble("startLon", 0.0),
         o.optDouble("maxSpeedMs", 0.0), o.optLong("elapsedS", 0L),
-        o.optJSONArray("thumb")?.let { arr ->
-            (0 until arr.length()).map { i -> arr.getJSONArray(i).let { Pt(it.getDouble(0), it.getDouble(1)) } }
-        } ?: emptyList(),
+        runCatching {
+            o.optJSONArray("thumb")?.let { arr ->
+                (0 until arr.length()).map { i -> arr.getJSONArray(i).let { Pt(it.getDouble(0), it.getDouble(1)) } }
+            }
+        }.getOrNull() ?: emptyList(),
     )
 
     companion object {

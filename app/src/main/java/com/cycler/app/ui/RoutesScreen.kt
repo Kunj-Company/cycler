@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -265,7 +268,10 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
             )
             if (meta != null) {
                 Sheet {
-                    Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+                    Column(
+                        Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Tag(if (recorded) "Ride" else "Planned")
                             DifficultyTag(meta.difficulty)
@@ -293,6 +299,22 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                         if (r != null) {
                             Spacer(Modifier.height(16.dp))
                             ElevationChart(r.pts)
+                            if (recorded) {
+                                val step = if (meta.distanceM >= 20_000) 5000.0 else 1000.0
+                                val splits = remember(r) { Geo.splits(r.pts, step) }
+                                if (splits.size >= 3) {
+                                    Spacer(Modifier.height(16.dp))
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        SectionLabel("Speed, each ${(step / 1000).toInt()} km")
+                                        Text(
+                                            "best ${splits.max().toInt()} km/h",
+                                            style = MaterialTheme.typography.labelMedium.tabular, color = Cy.colors.accent,
+                                        )
+                                    }
+                                    Spacer(Modifier.height(6.dp))
+                                    MiniBars(splits)
+                                }
+                            }
                         }
                         Spacer(Modifier.height(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

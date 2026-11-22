@@ -16,7 +16,8 @@ Or install the prebuilt debug build directly:
 
 - **Ride**: live map, start / pause / finish. Keeps recording with the screen off.
   Distance, speed, moving time, average, max, climb. Auto-pause when you stop.
-  Wind, temperature and rain chance on the map. Weekly goal progress before you start.
+  Wind, temperature and rain chance on the map. Weekly goal progress and a sunset
+  warning before you start. Switch map style from the map itself.
 - **Follow a route**: pick any saved or planned route and ride it. Shows distance to go,
   and vibrates if you leave the route.
 - **Plan → A to B**: Start and End fields, optional stops, search or long-press the map.
@@ -45,11 +46,11 @@ Neutral surfaces, hairline borders, ink-coloured buttons, one blue accent, Inter
 Tokens live in `ui/Theme.kt`, shared pieces (buttons, segmented control, sheet, metrics,
 charts) in `ui/Common.kt`.
 
-## Screenshots without a phone
+## Tests and screenshots without a phone
 
     ./gradlew testDebugUnitTest
 
-renders every screen, light and dark, to `app/build/shots/` using made-up rides.
+checks the distance, off-route and speed maths (`GeoTest`) and renders every screen, light and dark, to `app/build/shots/` using made-up rides.
 The map is drawn as a sketch there; real tiles only appear on a device.
 
 ## Where things live

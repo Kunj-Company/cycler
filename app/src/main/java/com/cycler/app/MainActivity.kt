@@ -3,6 +3,10 @@ package com.cycler.app
 import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.widget.Toast
 import android.content.pm.PackageManager
 import android.graphics.Color as AColor
 import android.os.Build
@@ -79,6 +83,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.maplibre.android.MapLibre
 import kotlin.math.abs
@@ -300,7 +306,14 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         tab = Tab.RIDE
     }
 
-    private fun loop(start: Pt, bearing: Double, target: Double, prof: String): BRouter.Result {
+    /** At most three routing requests at a time, to go easy on the shared public server. */
+    private val routing = Semaphore(3)
+
+    private suspend fun loop(start: Pt, bearing: Double, target: Double, prof: String): BRouter.Result = routing.withPermit {
+        loopBlocking(start, bearing, target, prof)
+    }
+
+    private fun loopBlocking(start: Pt, bearing: Double, target: Double, prof: String): BRouter.Result {
         var best = BRouter.route(Geo.loopWaypoints(start, bearing, target), prof)
         val ratio = best.distanceM / target
         if (ratio > 1.15 || ratio < 0.85) {
@@ -397,13 +410,37 @@ fun BottomBar(tab: Tab, onSelect: (Tab) -> Unit) {
 fun App(vm: MainVm) {
     val ctx = LocalContext.current
     var granted by remember { mutableStateOf(hasLocationPermission(ctx)) }
+    var askedOnce by remember { mutableStateOf(false) }
     val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         granted = hasLocationPermission(ctx)
+        askedOnce = true
     }
     val request = {
-        val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
-        askPermission.launch(perms.toTypedArray())
+        if (askedOnce && !hasLocationPermission(ctx)) {
+            // Android stops showing the dialog after a refusal (or an "Approximate" answer),
+            // so send the rider to the app's settings page to switch on precise location.
+            Toast.makeText(ctx, "Set Location to Allow, with Precise on", Toast.LENGTH_LONG).show()
+            runCatching {
+                ctx.startActivity(
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            Unit
+        } else {
+            val perms = mutableListOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            askPermission.launch(perms.toTypedArray())
+        }
+    }
+    // Coming back from the settings page: pick up a permission granted there.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) granted = hasLocationPermission(ctx)
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
     LaunchedEffect(Unit) { if (!granted) request() }
 

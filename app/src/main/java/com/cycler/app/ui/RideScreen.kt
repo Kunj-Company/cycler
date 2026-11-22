@@ -1,5 +1,6 @@
 package com.cycler.app.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -105,6 +106,11 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
         val g = vm.guide
         if (g != null && !active) { follow = false; camera = CameraCmd(g.pts) }
     }
+    LaunchedEffect(st.notice) {
+        val msg = st.notice ?: return@LaunchedEffect
+        TrackingService.state.update { it.copy(notice = null) }
+        Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+    }
     LaunchedEffect(st.savedId) {
         val id = st.savedId ?: return@LaunchedEffect
         TrackingService.state.update { it.copy(savedId = null) }
@@ -121,7 +127,13 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
     val lines = remember(guide, st.points) {
         buildList {
             if (guide != null) add(MapLine(guide.pts, COLOR_GUIDE, 5f))
-            if (st.points.size >= 2) add(MapLine(st.points, COLOR_TRACK, 5f))
+            if (st.points.size >= 2) {
+                // On long rides, thin out the drawn line so redrawing every second stays cheap.
+                val n = st.points.size
+                val step = n / 1500 + 1
+                val shown = if (step == 1) st.points else st.points.filterIndexed { i, _ -> i % step == 0 || i == n - 1 }
+                add(MapLine(shown, COLOR_TRACK, 5f))
+            }
         }
     }
     val dots = remember(here, guide) {
@@ -134,7 +146,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
     Box(Modifier.fillMaxSize()) {
         CyclerMap(
             Modifier.fillMaxSize(), vm.mapStyle, lines, dots, camera,
-            initial = vm.prefs.lastLoc,
+            initial = vm.prefs.lastLoc, initialZoom = 15.5,
             onUserMove = { follow = false },
         )
 
@@ -148,7 +160,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
                     Column(Modifier.weight(1f)) {
                         Text(guide.meta.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            if (active) "${Fmt.km((guide.meta.distanceM - st.guideDoneM).coerceAtLeast(0.0))} to go"
+                            if (active) "${Fmt.km(((if (st.guideTotalM > 0) st.guideTotalM else guide.meta.distanceM) - st.guideDoneM).coerceAtLeast(0.0))} to go"
                             else "${Fmt.km(guide.meta.distanceM)} · ↑ ${guide.meta.ascentM.toInt()} m",
                             style = MaterialTheme.typography.bodySmall.tabular,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -164,11 +176,14 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
         }
 
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-            MapChip(Modifier.align(Alignment.End).padding(12.dp), onClick = { follow = true; zoomed = false }) {
-                Icon(
-                    Icons.Outlined.MyLocation, "Centre on me", Modifier.size(20.dp),
-                    tint = if (follow) Cy.colors.accent else MaterialTheme.colorScheme.onSurface,
-                )
+            Column(Modifier.align(Alignment.End).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LayerButton(vm.mapStyle) { vm.mapStyle = it; vm.prefs.mapStyle = it }
+                MapChip(onClick = { follow = true; zoomed = false }) {
+                    Icon(
+                        Icons.Outlined.MyLocation, "Centre on me", Modifier.size(20.dp),
+                        tint = if (follow) Cy.colors.accent else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
             Sheet {
                 Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
@@ -254,6 +269,16 @@ private fun IdlePanel(
     }
     Spacer(Modifier.height(8.dp))
     Progress((weekKm / goal).toFloat(), color = if (weekKm >= goal) Cy.colors.success else Cy.colors.accent)
+    val sunset = vm.weather?.sunsetMs ?: 0L
+    val minsLeft = (sunset - System.currentTimeMillis()) / 60000
+    if (sunset > 0 && minsLeft < 120 && minsLeft > -360) {
+        Text(
+            if (minsLeft > 0) "Sunset in ${Fmt.dur(minsLeft * 60)}. Carry lights if you'll be out longer."
+            else "It's after sunset. Ride with lights.",
+            style = MaterialTheme.typography.bodySmall, color = Cy.colors.warn,
+            modifier = Modifier.padding(top = 10.dp),
+        )
+    }
     Spacer(Modifier.height(16.dp))
     CyButton(
         if (vm.guide != null) "Start and follow route" else "Start ride", onStart,
@@ -293,6 +318,18 @@ private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onFinish: () -
         )
     }
 
+    if (st.gpsOff) {
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(Radius).background(Cy.colors.warn.copy(alpha = 0.12f)).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Location is switched off. Turn it on to keep recording.",
+                style = MaterialTheme.typography.labelLarge, color = Cy.colors.warn,
+            )
+        }
+    }
     if (st.offRoute) {
         Spacer(Modifier.height(10.dp))
         Row(
@@ -323,7 +360,7 @@ private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onFinish: () -
     val g = vm.guide
     if (g != null && g.meta.distanceM > 0) {
         Spacer(Modifier.height(12.dp))
-        Progress((st.guideDoneM / g.meta.distanceM).toFloat())
+        Progress((st.guideDoneM / (if (st.guideTotalM > 0) st.guideTotalM else g.meta.distanceM)).toFloat())
     }
     Spacer(Modifier.height(16.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -377,6 +377,29 @@ fun WeekBars(km: List<Double>, goalKm: Int, modifier: Modifier = Modifier) {
     }
 }
 
+/** Plain bars for a short series, e.g. speed for each 5 km of a ride. */
+@Composable
+fun MiniBars(values: List<Double>, modifier: Modifier = Modifier) {
+    if (values.isEmpty()) return
+    val bar = MaterialTheme.colorScheme.onSurface
+    val best = Cy.colors.accent
+    Canvas(modifier.fillMaxWidth().height(56.dp)) {
+        val top = values.max().coerceAtLeast(1.0)
+        val gap = (if (values.size > 24) 2.dp else 5.dp).toPx()
+        val w = ((size.width - gap * (values.size - 1)) / values.size).coerceAtLeast(1f)
+        val bestIdx = values.indexOf(values.max())
+        values.forEachIndexed { i, v ->
+            val h = (v / top * size.height).toFloat().coerceAtLeast(2.dp.toPx())
+            drawRoundRect(
+                if (i == bestIdx) best else bar.copy(alpha = 0.85f),
+                topLeft = Offset(i * (w + gap), size.height - h),
+                size = androidx.compose.ui.geometry.Size(w, h),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()),
+            )
+        }
+    }
+}
+
 /** A thin progress bar. */
 @Composable
 fun Progress(fraction: Float, modifier: Modifier = Modifier, color: Color = Cy.colors.accent) {

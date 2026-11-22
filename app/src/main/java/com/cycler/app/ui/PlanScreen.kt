@@ -170,6 +170,9 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                 initial = vm.prefs.lastLoc,
                 onLongPress = if (mode == PlanMode.PAST) null else { p -> setPoint(p, "Pin on map") },
             )
+            LayerButton(vm.mapStyle, Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
+                vm.mapStyle = it; vm.prefs.mapStyle = it
+            }
             Column(Modifier.fillMaxWidth().padding(10.dp)) {
                 Surface(
                     shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface,
@@ -242,9 +245,13 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                 val startText = vm.start?.label ?: if (myLoc != null) "My location" else "My location (waiting for GPS…)"
                 when (mode) {
                     PlanMode.AB -> if (showResults) {
+                        val wind = option?.pts?.let { p ->
+                            if (p.size >= 2 && Geo.dist(p.first(), p.last()) > 1000) vm.weather?.feel(Geo.bearing(p.first(), p.last())) else null
+                        }
                         PlanSummary(
                             "Route", startText.substringBefore(",") + "  →  " + (vm.end?.label?.substringBefore(",") ?: "") +
                                 if (vm.vias.isNotEmpty()) "  (${vm.vias.size} stop${if (vm.vias.size > 1) "s" else ""})" else "",
+                            wind,
                         ) { vm.options = emptyList() }
                     } else {
                         StopRow(
@@ -421,11 +428,14 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
 
 /** Shown above the results in place of the editor, so the routes stay in view. */
 @Composable
-private fun PlanSummary(title: String, value: String, onEdit: () -> Unit) {
+private fun PlanSummary(title: String, value: String, note: String? = null, onEdit: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(end = 12.dp)) {
             SectionLabel(title)
             Text(value, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (note != null) {
+                Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         CyButton("Edit", onEdit, kind = Btn.SECONDARY, height = 36.dp)
     }

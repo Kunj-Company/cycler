@@ -10,6 +10,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -56,6 +58,9 @@ object MapStyles {
     fun builder(key: String): Style.Builder =
         if (key == "cyclosm") Style.Builder().fromJson(CYCLOSM)
         else Style.Builder().fromUri("https://tiles.openfreemap.org/styles/$key")
+
+    const val BLANK =
+        """{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#E9ECE6"}}]}"""
 
     private val CYCLOSM = """
         {"version":8,"sources":{"cyclosm":{"type":"raster","tiles":[
@@ -107,6 +112,7 @@ fun CyclerMap(
     dots: List<MapDot>,
     camera: CameraCmd?,
     initial: Pt? = null,
+    initialZoom: Double = 13.0,
     onLongPress: ((Pt) -> Unit)? = null,
     onUserMove: (() -> Unit)? = null,
 ) {
@@ -125,20 +131,23 @@ fun CyclerMap(
     val userMove by rememberUpdatedState(onUserMove)
 
     DisposableEffect(lifecycle) {
+        // Each start/resume is undone exactly once, whether by the lifecycle or by leaving the screen.
+        var started = false
+        var resumed = false
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
-                Lifecycle.Event.ON_START -> mapView.onStart()
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                Lifecycle.Event.ON_START -> if (!started) { mapView.onStart(); started = true }
+                Lifecycle.Event.ON_RESUME -> if (!resumed) { mapView.onResume(); resumed = true }
+                Lifecycle.Event.ON_PAUSE -> if (resumed) { mapView.onPause(); resumed = false }
+                Lifecycle.Event.ON_STOP -> if (started) { mapView.onStop(); started = false }
                 else -> {}
             }
         }
         lifecycle.addObserver(obs)
         onDispose {
             lifecycle.removeObserver(obs)
-            mapView.onPause()
-            mapView.onStop()
+            if (resumed) mapView.onPause()
+            if (started) mapView.onStop()
             mapView.onDestroy()
         }
     }
@@ -149,7 +158,7 @@ fun CyclerMap(
             m.uiSettings.isTiltGesturesEnabled = false
             m.cameraPosition = CameraPosition.Builder()
                 .target(LatLng(initial?.lat ?: 20.6, initial?.lon ?: 78.9))
-                .zoom(if (initial != null) 13.0 else 3.5)
+                .zoom(if (initial != null) initialZoom else 3.5)
                 .build()
             m.addOnMapLongClickListener { ll ->
                 longPress?.invoke(Pt(ll.latitude, ll.longitude))
@@ -162,9 +171,19 @@ fun CyclerMap(
         }
     }
 
-    LaunchedEffect(map, styleKey) {
+    // No signal: the map style can't download. Fall back to a plain background so the
+    // recorded track and the route being followed are still drawn.
+    var styleFailed by remember(styleKey) { mutableStateOf(false) }
+    DisposableEffect(mapView) {
+        val l = MapView.OnDidFailLoadingMapListener { styleFailed = true }
+        mapView.addOnDidFailLoadingMapListener(l)
+        onDispose { mapView.removeOnDidFailLoadingMapListener(l) }
+    }
+
+    LaunchedEffect(map, styleKey, styleFailed) {
         val m = map ?: return@LaunchedEffect
-        m.setStyle(MapStyles.builder(styleKey)) { style ->
+        val builder = if (styleFailed) Style.Builder().fromJson(MapStyles.BLANK) else MapStyles.builder(styleKey)
+        m.setStyle(builder) { style ->
             style.addSource(GeoJsonSource(SRC_LINES))
             style.addSource(GeoJsonSource(SRC_DOTS))
             style.addLayer(
@@ -254,6 +273,37 @@ private fun MapPlaceholder(modifier: Modifier, lines: List<MapLine>, dots: List<
         for (d in dots) {
             drawCircle(Color.White, d.radius * 2.6f + 6f, pos(d.pt))
             drawCircle(Color(android.graphics.Color.parseColor(d.color)), d.radius * 2.6f, pos(d.pt))
+        }
+    }
+}
+
+/** A map control that lets the rider switch map style on the spot. */
+@Composable
+fun LayerButton(current: String, modifier: Modifier = Modifier, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    androidx.compose.foundation.layout.Box(modifier) {
+        MapChip(onClick = { open = true }) {
+            androidx.compose.material3.Icon(
+                androidx.compose.material.icons.Icons.Outlined.Layers, "Map style",
+                Modifier.size(20.dp),
+            )
+        }
+        androidx.compose.material3.DropdownMenu(
+            expanded = open, onDismissRequest = { open = false },
+            containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+            shape = Radius, border = androidx.compose.foundation.BorderStroke(1.dp, Cy.colors.border),
+        ) {
+            MapStyles.all.forEach { (key, label) ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = {
+                        androidx.compose.material3.Text(
+                            label,
+                            color = if (key == current) Cy.colors.accent else androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
+                        )
+                    },
+                    onClick = { open = false; onPick(key) },
+                )
+            }
         }
     }
 }

@@ -109,6 +109,37 @@ object Geo {
         return gain
     }
 
+    /** Compass bearing from [a] to [b], degrees. */
+    fun bearing(a: Pt, b: Pt): Double {
+        val la1 = rad(a.lat)
+        val la2 = rad(b.lat)
+        val dLon = rad(b.lon - a.lon)
+        val y = sin(dLon) * cos(la2)
+        val x = cos(la1) * sin(la2) - sin(la1) * cos(la2) * cos(dLon)
+        return (deg(atan2(y, x)) + 360) % 360
+    }
+
+    /**
+     * Average speed in km/h for each [stepM] of a recorded ride, from the
+     * points' timestamps. Empty when the ride has no usable times.
+     */
+    fun splits(pts: List<Pt>, stepM: Double): List<Double> {
+        if (pts.size < 2 || pts.first().t <= 0) return emptyList()
+        val out = ArrayList<Double>()
+        var segDist = 0.0
+        var segStart = pts.first().t
+        for (i in 1 until pts.size) {
+            segDist += dist(pts[i - 1], pts[i])
+            if (segDist >= stepM) {
+                val dt = (pts[i].t - segStart) / 1000.0
+                if (dt > 0) out.add(segDist / dt * 3.6)
+                segDist = 0.0
+                segStart = pts[i].t
+            }
+        }
+        return out
+    }
+
     /** Up to [n] evenly spaced points, enough to sketch the shape of a route. */
     fun simplify(pts: List<Pt>, n: Int = 48): List<Pt> {
         if (pts.size <= n) return pts.map { Pt(it.lat, it.lon) }
@@ -116,39 +147,38 @@ object Geo {
     }
 
     /**
-     * Where [p] sits relative to a route: distance from the route in metres and
-     * how far along it the nearest spot is. [cum] holds the distance from the
-     * start to each route point. Searches near [hint] first for speed.
+     * Where [p] sits relative to a route: distance from the route in metres, how
+     * far along it the nearest spot is, and that segment's index. [cum] holds the
+     * distance from the start to each route point.
+     *
+     * [done] is how far the rider has already come. Spots a little behind to two
+     * kilometres ahead of that are preferred, so a loop that ends where it starts,
+     * or a route that goes out and back on one road, doesn't make progress jump.
+     * If nothing there is close, the nearest spot anywhere on the route is used.
      */
-    fun nearestOnRoute(p: Pt, route: List<Pt>, cum: DoubleArray, hint: Int): Triple<Double, Double, Int> {
-        fun scan(from: Int, to: Int): Triple<Double, Double, Int> {
-            var best = Double.MAX_VALUE
-            var along = 0.0
-            var idx = from
-            val kx = 111320.0 * cos(rad(p.lat))
-            val ky = 110540.0
-            for (i in from until to) {
-                val a = route[i]
-                val b = route[i + 1]
-                val ax = (a.lon - p.lon) * kx
-                val ay = (a.lat - p.lat) * ky
-                val bx = (b.lon - p.lon) * kx
-                val by = (b.lat - p.lat) * ky
-                val dx = bx - ax
-                val dy = by - ay
-                val len2 = dx * dx + dy * dy
-                val t = if (len2 == 0.0) 0.0 else (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
-                val cx = ax + t * dx
-                val cy = ay + t * dy
-                val d = sqrt(cx * cx + cy * cy)
-                if (d < best) { best = d; along = cum[i] + t * (cum[i + 1] - cum[i]); idx = i }
-            }
-            return Triple(best, along, idx)
-        }
+    fun nearestOnRoute(p: Pt, route: List<Pt>, cum: DoubleArray, done: Double): Triple<Double, Double, Int> {
         if (route.size < 2) return Triple(Double.MAX_VALUE, 0.0, 0)
-        val last = route.size - 1
-        val near = scan(maxOf(0, hint - 15), minOf(last, hint + 150))
-        return if (near.first <= 60.0) near else scan(0, last)
+        val kx = 111320.0 * cos(rad(p.lat))
+        val ky = 110540.0
+        var best = Double.MAX_VALUE; var bestAlong = 0.0; var bestIdx = 0
+        var win = Double.MAX_VALUE; var winAlong = 0.0; var winIdx = 0
+        for (i in 0 until route.size - 1) {
+            val a = route[i]
+            val b = route[i + 1]
+            val ax = (a.lon - p.lon) * kx
+            val ay = (a.lat - p.lat) * ky
+            val dx = (b.lon - p.lon) * kx - ax
+            val dy = (b.lat - p.lat) * ky - ay
+            val len2 = dx * dx + dy * dy
+            val t = if (len2 == 0.0) 0.0 else (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
+            val cx = ax + t * dx
+            val cy = ay + t * dy
+            val d = sqrt(cx * cx + cy * cy)
+            val along = cum[i] + t * (cum[i + 1] - cum[i])
+            if (d < best) { best = d; bestAlong = along; bestIdx = i }
+            if (along >= done - 300.0 && along <= done + 2000.0 && d < win) { win = d; winAlong = along; winIdx = i }
+        }
+        return if (win <= 60.0) Triple(win, winAlong, winIdx) else Triple(best, bestAlong, bestIdx)
     }
 
     fun cumulative(pts: List<Pt>): DoubleArray {
