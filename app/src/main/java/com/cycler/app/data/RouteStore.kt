@@ -417,6 +417,10 @@ class Prefs(ctx: Context) {
     var weeklyGoalKm: Int
         get() = sp.getInt("weeklyGoalKm", 50)
         set(v) = sp.edit().putInt("weeklyGoalKm", v).apply()
+    /** Whether the first-launch setup has been completed or skipped. */
+    var onboarded: Boolean
+        get() = sp.getBoolean("onboarded", false)
+        set(v) = sp.edit().putBoolean("onboarded", v).apply()
     /** Whether ride pages open with the detailed numbers showing. */
     var advancedStats: Boolean
         get() = sp.getBoolean("advancedStats", false)

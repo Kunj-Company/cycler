@@ -78,6 +78,7 @@ import com.cycler.app.ui.Cy
 import com.cycler.app.ui.CyclerTheme
 import com.cycler.app.ui.Hairline
 import com.cycler.app.ui.HeatmapScreen
+import com.cycler.app.ui.Onboarding
 import com.cycler.app.ui.ShareScreen
 import com.cycler.app.ui.OfflineScreen
 import com.cycler.app.ui.PlanScreen
@@ -195,6 +196,8 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     var editIsNew by mutableStateOf(false)
     var showHeatmap by mutableStateOf(false)
     var care by mutableStateOf(prefs.care)
+    /** False until the first-launch setup is done; riders who already have rides never see it. */
+    var onboarded by mutableStateOf(prefs.onboarded || store.metas.value.isNotEmpty())
 
     fun saveCare(items: List<CareItem>) {
         care = items
@@ -494,7 +497,7 @@ fun App(vm: MainVm) {
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
-    LaunchedEffect(Unit) { if (!granted) request() }
+    LaunchedEffect(Unit) { if (vm.onboarded && !granted) request() }
 
     val myLoc by produceState<Pt?>(initialValue = null, granted) {
         if (granted) locationFlow(ctx).collect {
@@ -504,6 +507,10 @@ fun App(vm: MainVm) {
         }
     }
 
+    if (!vm.onboarded) {
+        Onboarding(vm, granted, request) { vm.onboarded = true; vm.prefs.onboarded = true }
+        return
+    }
     val share = vm.shareId
     if (share != null) {
         BackHandler { vm.shareId = null }
