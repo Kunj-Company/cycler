@@ -344,9 +344,15 @@ object Geo {
 
     fun dist(a: Pt, b: Pt) = dist(a.lat, a.lon, b.lat, b.lon)
 
+    /** Distance between consecutive points, zero when the timestamps show it was a GPS jump. */
+    fun segLen(a: Pt, b: Pt): Double {
+        val d = dist(a, b)
+        return if (a.t > 0 && b.t > 0) GpsJump.countedLength(d, b.t - a.t) else d
+    }
+
     fun length(pts: List<Pt>): Double {
         var d = 0.0
-        for (i in 1 until pts.size) d += dist(pts[i - 1], pts[i])
+        for (i in 1 until pts.size) d += segLen(pts[i - 1], pts[i])
         return d
     }
 
@@ -407,7 +413,7 @@ object Geo {
         var segDist = 0.0
         var segStart = pts.first().t
         for (i in 1 until pts.size) {
-            segDist += dist(pts[i - 1], pts[i])
+            segDist += segLen(pts[i - 1], pts[i])
             if (segDist >= stepM) {
                 val dt = (pts[i].t - segStart) / 1000.0
                 if (dt > 0) out.add(segDist / dt * 3.6)
@@ -499,7 +505,7 @@ object Geo {
 
     fun cumulative(pts: List<Pt>): DoubleArray {
         val out = DoubleArray(pts.size)
-        for (i in 1 until pts.size) out[i] = out[i - 1] + dist(pts[i - 1], pts[i])
+        for (i in 1 until pts.size) out[i] = out[i - 1] + segLen(pts[i - 1], pts[i])
         return out
     }
 

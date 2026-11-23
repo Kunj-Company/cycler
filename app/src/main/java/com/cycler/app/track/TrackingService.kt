@@ -28,6 +28,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.cycler.app.MainActivity
 import com.cycler.app.data.Geo
+import com.cycler.app.data.GpsJump
 import com.cycler.app.data.LapMark
 import com.cycler.app.data.Workout
 import com.cycler.app.data.Prefs
@@ -340,7 +341,10 @@ class TrackingService : Service(), LocationListener {
         // Only keep a new point after really moving: GPS wanders several metres while you
         // stand at a signal, and that must not count as distance.
         val keep = last == null || (gap >= 4.0 && speed >= 0.5f) || gap >= 15.0
-        val addDist = if (keep && !skipNextSegment) gap else 0.0
+        // A GPS jump is stored (it becomes the new anchor) but adds no distance or moving time.
+        val jump = last != null && GpsJump.isJump(gap, pt.t - last.t)
+        val addDist = GpsJump.addedDistance(gap, pt.t - (last?.t ?: pt.t), keep, skipNextSegment)
+        if (jump) movingAdd = 0L
         if (keep) {
             skipNextSegment = false
             runCatching {
