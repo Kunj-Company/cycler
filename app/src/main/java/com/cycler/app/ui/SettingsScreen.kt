@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,6 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cycler.app.MainVm
 import com.cycler.app.net.BRouter
+import com.cycler.app.net.UpdateCheck
+import com.cycler.app.net.Updates
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -80,6 +83,7 @@ private fun titleOf(page: String) = when (page) {
     "data" -> "Maps and data"
     "phone" -> "Phone"
     "about" -> "About"
+    "updates" -> "Updates"
     "whatsnew" -> "What's new"
     "licence" -> "Licence"
     "notices" -> "Open-source notices"
@@ -193,6 +197,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                                 "App and phone",
                                 HubItem(Icons.Outlined.Map, "Maps and data", "Offline maps, backup and restore") { page = "data" },
                                 HubItem(Icons.Outlined.PhoneAndroid, "Phone", "Battery, location and notifications") { page = "phone" },
+                                HubItem(Icons.Outlined.SystemUpdate, "Updates", if (version.isEmpty()) "Check for a newer version" else "Version $version") { page = "updates" },
                                 HubItem(Icons.Outlined.Info, "About", if (version.isEmpty()) "Cycler" else "Cycler $version") { page = "about" },
                             )
                         }
@@ -345,6 +350,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                         }
 
                         "about" -> AboutPage(version) { page = it }
+                        "updates" -> UpdatesPage(version)
                         "whatsnew" -> WhatsNewPage()
                         "licence" -> LicencePage()
                         "notices" -> NoticesPage()
@@ -514,6 +520,60 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     ).forEach {
         Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
     }
+}
+
+private fun openUrl(ctx: android.content.Context, url: String): Boolean = runCatching {
+    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}.isSuccess
+
+@Composable
+private fun UpdatesPage(version: String) {
+    val ctx = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<UpdateCheck?>(null) }
+    PageNote("You have Cycler ${version.ifEmpty { "(unknown version)" }}.")
+    CyButton(
+        if (checking) "Checking…" else "Check for updates",
+        {
+            checking = true
+            scope.launch {
+                result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Updates.check(version) }
+                checking = false
+            }
+        },
+        Modifier.fillMaxWidth().padding(vertical = 8.dp), Btn.SECONDARY, enabled = !checking,
+    )
+    Spacer(Modifier.height(12.dp))
+    when (val r = result) {
+        is UpdateCheck.UpToDate -> Text("You have the latest version (${r.version}).", style = MaterialTheme.typography.bodyLarge)
+        is UpdateCheck.Error -> Text(r.message, style = MaterialTheme.typography.bodyLarge)
+        is UpdateCheck.Available -> {
+            val rel = r.release
+            Text("Cycler ${rel.version} is available", style = MaterialTheme.typography.titleMedium)
+            Updates.displayDate(rel.publishedAt)?.let {
+                Text("Released $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(
+                "It installs over the current app and keeps your rides.",
+                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
+            )
+            CyButton(
+                "Download", { if (!openUrl(ctx, rel.apkUrl ?: rel.htmlUrl)) openUrl(ctx, rel.htmlUrl) },
+                Modifier.fillMaxWidth().padding(top = 16.dp),
+            )
+            CyButton(
+                "Release notes", { openUrl(ctx, rel.htmlUrl) },
+                Modifier.fillMaxWidth().padding(top = 8.dp), Btn.SECONDARY,
+            )
+        }
+        null -> {}
+    }
+    Spacer(Modifier.height(20.dp))
+    Text(
+        "Checks github.com. Nothing else is sent.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

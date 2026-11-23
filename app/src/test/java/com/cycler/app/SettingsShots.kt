@@ -61,6 +61,7 @@ class SettingsShots {
     @Test fun licence() = shot("set_11_licence", "licence")
     @Test fun licence_dark() = shot("set_11_licence_dark", "licence", dark = true)
     @Test fun notices() = shot("set_12_notices", "notices")
+    @Test fun updates() = shot("set_13_updates", "updates")
     @Test fun recording_off() {
         vm.autoPause = false
         shot("set_03_recording_off", "recording")
