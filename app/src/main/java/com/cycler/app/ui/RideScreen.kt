@@ -171,6 +171,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
             Modifier.fillMaxSize(), vm.mapStyle, lines, dots, camera,
             initial = vm.prefs.lastLoc, initialZoom = 15.5,
             onUserMove = { follow = false },
+            attributionTopEnd = true,
         )
 
         Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(12.dp)) {

@@ -12,6 +12,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.outlined.Layers
+import android.view.Gravity
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -115,6 +118,8 @@ fun CyclerMap(
     initialZoom: Double = 13.0,
     onLongPress: ((Pt) -> Unit)? = null,
     onUserMove: (() -> Unit)? = null,
+    // Full-screen maps with a bottom sheet over them move the OSM attribution to the top-end corner.
+    attributionTopEnd: Boolean = false,
 ) {
     if (LocalInspectionMode.current) {
         // Previews and screenshot tests can't run the real map engine; sketch the content instead.
@@ -152,9 +157,16 @@ fun CyclerMap(
         }
     }
 
+    val density = LocalDensity.current
+    val statusTop = WindowInsets.statusBars.getTop(density)
     LaunchedEffect(Unit) {
         mapView.getMapAsync { m ->
             m.uiSettings.isLogoEnabled = false
+            if (attributionTopEnd) {
+                val gap = (12 * density.density).toInt()
+                m.uiSettings.attributionGravity = Gravity.TOP or Gravity.END
+                m.uiSettings.setAttributionMargins(0, statusTop + gap, gap, 0)
+            }
             m.uiSettings.isTiltGesturesEnabled = false
             m.cameraPosition = CameraPosition.Builder()
                 .target(LatLng(initial?.lat ?: 20.6, initial?.lon ?: 78.9))
