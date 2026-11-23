@@ -486,6 +486,12 @@ private fun SimpleLinkRow(title: String, onClick: () -> Unit) {
 }
 
 @Composable
+private fun AboutLinkRow(title: String, note: String, url: String) {
+    val ctx = LocalContext.current
+    LinkRow(title, note, external = true) { openUrl(ctx, url) }
+}
+
+@Composable
 private fun AboutPage(version: String, open: (String) -> Unit) {
     Spacer(Modifier.height(16.dp))
     Text("Cycler", style = MaterialTheme.typography.headlineMedium)
@@ -494,7 +500,8 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     }
     Text(
         "A cycling app for recording rides with GPS, planning routes and looking back on your rides. " +
-            "Everything stays on this phone: no account, no cloud, no tracking.",
+            "Your rides stay on this phone, with no account and no analytics. Weather, route planning, " +
+            "search and the update check use online services (see Privacy).",
         style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp),
     )
     Text("Developed by Abhiram N J", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
@@ -507,6 +514,8 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     SimpleLinkRow("What's new") { open("whatsnew") }
     SimpleLinkRow("Licence") { open("licence") }
     SimpleLinkRow("Open-source notices") { open("notices") }
+    AboutLinkRow("Source code on GitHub", "github.com/Kunj-Company/cycler", Updates.REPO_URL)
+    AboutLinkRow("Releases", "github.com/Kunj-Company/cycler/releases", Updates.RELEASES_URL)
     Spacer(Modifier.height(28.dp))
     SectionLabel("Credits")
     Spacer(Modifier.height(8.dp))
