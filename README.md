@@ -77,6 +77,44 @@ Versions are numbered 0.1.N and tagged `v0.1.N`. Commits follow Conventional Com
 (`feat`, `fix`, `build`, `test`, `docs`, `chore`), one topic per commit. `CHANGELOG.md`
 lists what each version added.
 
+## Release builds
+
+Release builds are shrunk with R8 and signed with an upload key kept outside the repo.
+Without that key the project still builds; the release APK is just left unsigned.
+
+One-time setup (the key and its password never go into Git):
+
+1. Create the key, outside the repo:
+
+       mkdir -p ~/keystores && chmod 700 ~/keystores
+       keytool -genkeypair -v -keystore ~/keystores/cycler-upload.jks -storetype PKCS12 \
+         -alias cycler -keyalg RSA -keysize 2048 -validity 10000
+
+2. Copy `keystore.properties.example` to `keystore.properties` (git-ignored), fill in the
+   path and password, then `chmod 600 keystore.properties`.
+3. Back up `cycler-upload.jks` and its password somewhere safe, away from this computer.
+   Losing either means no more updates under this signature: phones with Cycler
+   installed would have to uninstall it, and lose their data, to take a new build.
+
+Build and check:
+
+    ./gradlew assembleRelease bundleRelease
+    $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs \
+      app/build/outputs/apk/release/app-release.apk
+
+- APK: `app/build/outputs/apk/release/app-release.apk` (for GitHub releases)
+- Bundle: `app/build/outputs/bundle/release/app-release.aab` (for Google Play)
+- Keep `app/build/outputs/mapping/release/mapping.txt` from each release, to decode
+  crash stack traces from that version.
+
+Updates install over the previous version, keeping its data, only when they are signed
+with the same key and have a higher `versionCode`. A debug build cannot be installed over
+a release build or the other way round. To move a phone from one to the other, back up in
+the app (Settings → Maps and data → Back up everything), uninstall, install, and restore.
+
+If Cycler goes on Google Play, enrol in Play App Signing and register this key as the
+upload key.
+
 ## Design
 
 Neutral surfaces, hairline borders, ink-coloured buttons, one blue accent, Inter type.
