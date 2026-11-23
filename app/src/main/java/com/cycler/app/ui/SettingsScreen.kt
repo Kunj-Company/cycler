@@ -104,7 +104,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
     ) { uri ->
         if (uri != null) scope.launch {
             val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { vm.store.exportAll(it, mapOf("care.json" to com.cycler.app.data.CareItem.encode(vm.care))) } }.getOrNull()
+                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { vm.store.exportAll(it, mapOf("care.json" to com.cycler.app.data.CareItem.encode(vm.care), "prefs.json" to vm.prefs.exportJson())) } }.getOrNull()
             }
             toast(if (n != null) "Backed up $n rides and routes" else "Couldn't write the backup")
         }
@@ -114,11 +114,13 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
     ) { uri ->
         if (uri != null) scope.launch {
             var pendingCare: String? = null
+            var pendingPrefs: String? = null
             val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openInputStream(uri)!!.use { vm.store.importAll(it) { name, text -> if (name == "care.json") pendingCare = text } } }.getOrNull()
+                runCatching { ctx.contentResolver.openInputStream(uri)!!.use { vm.store.importAll(it) { name, text -> if (name == "care.json") pendingCare = text else if (name == "prefs.json") pendingPrefs = text } } }.getOrNull()
             }
-            // The bike care list in the backup replaces the one here.
+            // The bike care list and settings in the backup replace the ones here.
             pendingCare?.let { vm.saveCare(com.cycler.app.data.CareItem.parse(it)) }
+            pendingPrefs?.let { if (vm.prefs.importJson(it) > 0) vm.reloadSettings() }
             toast(if (n != null && n > 0) "Restored $n files from the backup" else "That file isn't a Cycler backup")
         }
     }
@@ -320,7 +322,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                         "data" -> {
                             PageNote("Everything lives on this phone only. Keep a backup somewhere else.")
                             LinkRow("Offline maps", "Save the map for an area so it shows without mobile data.") { vm.showOffline = true }
-                            LinkRow("Back up everything", "One zip with all rides, routes, photos and a GPX copy of each.") {
+                            LinkRow("Back up everything", "One zip with all rides, routes, photos, your settings and a GPX copy of each ride.") {
                                 backup.launch("cycler-backup-" + java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(java.util.Date()) + ".zip")
                             }
                             LinkRow("Restore from a backup", "Adds the rides from a backup zip. Nothing already here is removed.") {

@@ -545,6 +545,64 @@ class Prefs(ctx: Context) {
     var care: List<CareItem>
         get() = CareItem.parse(sp.getString("care", null))
         set(v) = sp.edit().putString("care", CareItem.encode(v)).apply()
+    /**
+     * The rider's preferences as JSON, for backups. Only keys in [SPEC] are written: no last
+     * location (device state) and no care list (it has its own file in the backup).
+     */
+    fun exportJson(): String {
+        val o = JSONObject()
+        for ((key, spec) in SPEC) {
+            if (!sp.contains(key)) continue
+            runCatching {
+                when (spec.type) {
+                    'b' -> o.put(key, sp.getBoolean(key, false))
+                    'i' -> o.put(key, sp.getInt(key, 0))
+                    else -> o.put(key, sp.getString(key, ""))
+                }
+            }
+        }
+        return o.toString()
+    }
+
+    /** Apply preferences from [exportJson]. Unknown keys, wrong types and out-of-range values are ignored. Returns how many were applied. */
+    fun importJson(text: String): Int {
+        val o = runCatching { JSONObject(text) }.getOrNull() ?: return 0
+        val ed = sp.edit()
+        var n = 0
+        for ((key, spec) in SPEC) {
+            val v = o.opt(key) ?: continue
+            when (spec.type) {
+                'b' -> if (v is Boolean) { ed.putBoolean(key, v); n++ }
+                'i' -> if (v is Int && v in spec.min..spec.max) { ed.putInt(key, v); n++ }
+                else -> if (v is String && v.isNotBlank() && v.length <= spec.max && (spec.allowed == null || v in spec.allowed)) {
+                    ed.putString(key, v); n++
+                }
+            }
+        }
+        ed.apply()
+        if (n > 0) Widgets.updateAll(appContext)
+        return n
+    }
+
+    /** One restorable preference: type 'b'oolean, 'i'nt (min..max) or 's'tring (not blank, up to max characters, optionally one of fixed values). */
+    internal class Spec(val type: Char, val min: Int = 0, val max: Int = 0, val allowed: Set<String>? = null)
+
+    companion object {
+        /** The only keys a backup carries or restores; everything else in the file is device or transient state. */
+        internal val SPEC: Map<String, Spec> = mapOf(
+            "profile" to Spec('s', max = 64), "mapStyle" to Spec('s', max = 64),
+            "keepScreenOn" to Spec('b'),
+            "themeMode" to Spec('s', max = 16, allowed = setOf("system", "light", "dark")),
+            "autoPause" to Spec('b'), "autoPauseLevel" to Spec('i', 0, 2),
+            "offRouteAlert" to Spec('b'),
+            "voice" to Spec('b'), "voiceEveryKm" to Spec('i', 1, 100), "turnCues" to Spec('b'),
+            "weeklyGoalKm" to Spec('i', 0, 100_000), "advancedStats" to Spec('b'),
+            "weightKg" to Spec('i', 0, 1000), "autoLapKm" to Spec('i', 0, 1000),
+            "ridePages" to Spec('s', max = 1000), "customWorkout" to Spec('s', max = 200),
+            "onboarded" to Spec('b'),
+        )
+    }
+
     var lastLoc: Pt?
         get() = if (sp.contains("lastLat")) Pt(sp.getFloat("lastLat", 0f).toDouble(), sp.getFloat("lastLon", 0f).toDouble()) else null
         set(v) {
