@@ -1,81 +1,161 @@
-# Cycler
+<p align="center">
+  <img src="docs/images/banner.png" alt="Cycler: record rides, plan routes, look back on every ride" width="100%">
+</p>
 
-A personal cycling app for Android: record rides, plan routes, get loop suggestions.
-No account, no cloud, no tracking. Everything is saved on the phone.
+<p align="center">
+  <a href="https://github.com/Kunj-Company/cycler/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/Kunj-Company/cycler?include_prereleases&label=release&color=2563EB"></a>
+  <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white">
+  <img alt="Kotlin and Jetpack Compose" src="https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white">
+  <a href="LICENSE"><img alt="MIT licence" src="https://img.shields.io/badge/licence-MIT-1C1C1A"></a>
+</p>
 
-Open source under the [MIT licence](LICENSE). Developed by Abhiram N J.
+<p align="center">
+  <b>A personal cycling app for Android.</b><br>
+  Record rides with the screen off, plan routes and loops, and look back on every ride.<br>
+  No account, no cloud, no ads. Everything is saved on your phone.
+</p>
 
-## Run it
+<p align="center">
+  <a href="https://github.com/Kunj-Company/cycler/releases"><b>⬇&nbsp; Download the latest APK</b></a>
+</p>
 
-Needs Android 8.0 or newer.
+---
 
-1. Open this folder in Android Studio and let Gradle sync.
-2. Plug in the phone (USB debugging on) and press Run.
+## Record
 
-Or build and install from a terminal:
+Live map with weather, distance, speed, moving time, climb and auto-pause. Recording keeps
+going with the screen off. Laps, interval workouts with spoken prompts, a big-number screen
+you lay out yourself, and turn-by-turn cues when you follow a route.
 
-    ./gradlew assembleDebug
-    adb install -r app/build/outputs/apk/debug/app-debug.apk
+<p align="center"><img src="docs/images/screens-ride.png" alt="Ride screen, recording, big numbers and turn cues" width="100%"></p>
 
-## What it does
+## Plan, then look back
 
-- **Ride**: live map, start / pause / finish. Keeps recording with the screen off.
-  Distance, speed, moving time, average, max, climb. Auto-pause when you stop.
+Plan A-to-B routes or round-trip loops from 5 to 200 km, with climb, time and an elevation
+profile. Every finished ride gets its own page: map, stats, laps, photos, notes, tags and
+optional advanced stats.
+
+<p align="center"><img src="docs/images/screens-plan.png" alt="Planning A to B and loops, the rides feed and a ride page" width="100%"></p>
+
+## Activity, bike care and sharing
+
+Weekly, monthly and yearly charts with records and best efforts. Bike care reminds you to
+lube the chain or service the bike by kilometres or days. Share a ride as a 3D flyover video
+or a card in 13 styles.
+
+<p align="center"><img src="docs/images/screens-more.png" alt="Activity chart, bike care, share cards and settings" width="100%"></p>
+
+<p align="center"><img src="docs/images/share-cards.png" alt="Five of the share card styles" width="100%"></p>
+
+## Home-screen widgets
+
+**Ride** starts, pauses and laps a ride from the home screen and shows live numbers.
+**This week** tracks your weekly goal, **Last ride** sums up your latest ride, and
+**Riding stats** shows the last seven days.
+
+<p align="center"><img src="docs/images/widgets.png" alt="Ride and This week widgets on a home screen, light and dark" width="78%"></p>
+
+## Dark mode, everywhere
+
+<p align="center"><img src="docs/images/screens-dark.png" alt="Recording, rides, activity and about in dark mode" width="100%"></p>
+
+<details>
+<summary><b>Everything Cycler does</b></summary>
+
+- **Ride**: live map, start, pause and finish. Keeps recording with the screen off.
+  Distance, speed, moving time, average, max and climb. Auto-pause when you stop.
   Wind, temperature and rain chance on the map. Weekly goal progress and a sunset
   warning before you start. Switch map style from the map itself.
-- **Follow a route**: pick any saved or planned route and ride it. Shows distance to go,
-  and vibrates if you leave the route.
-- **While following**: the next turn and its distance, a nudge before each turn, climbs
-  coming up, traffic signals on the map, and a big-number screen for the handlebar.
+- **Follow a route**: ride any saved or planned route, with distance to go and a vibration
+  if you leave it. The next turn and its distance, a nudge before each turn, climbs coming
+  up and traffic signals on the map.
 - **Laps and workouts**: a Lap button and optional auto-lap; interval workouts with
   on-screen, vibration and spoken prompts for each block.
-- **Ride screen**: the big-number screen is swipeable pages of fields you choose.
-- **Plan → A to B**: Start and End fields, optional stops, search or long-press the map.
+- **Ride screen**: swipeable pages of big numbers, with the fields you choose.
+- **Plan → A to B**: start and end fields, optional stops, search or long-press the map.
   Up to three routes with distance, climb, time, difficulty and an elevation profile.
-- **Plan → Loop**: pick a distance (5–200 km), get round trips in four directions.
-- **Plan → Saved**: "Suggest routes near me" (short, medium, long loops) and your saved
-  routes, with GPX import.
-- **Rides**: a feed of your finished rides with stats, route shape, photos, how it felt,
-  notes and tags. Filter by week, month or year, sort, search and filter by tag.
+- **Plan → Loop**: pick a distance (5–200 km) and get round trips in four directions.
+- **Plan → Saved**: "Suggest routes near me" (short, medium and long loops), your saved
+  routes, and GPX import.
+- **Rides**: a feed of finished rides with stats, route shape, photos, how it felt, notes
+  and tags. Filter by week, month or year, sort, search and filter by tag.
 - **After a ride**: a save page for the title, how it felt, notes, tags, photos and videos.
   The same page edits a ride later.
+- **Ride page**: photos and videos, laps, stops, stopped time, signal count, heart rate,
+  and advanced speed, time, stop, elevation and effort detail.
 - **Activity**: one chart by week, month or year for distance, time or climb, with totals,
-  records and best efforts.
-- **Ride page**: attach photos and videos, see stops, stopped time and signal count.
-- **Share**: an animated 3D flyover video of the ride's map (slow start, fast middle, slow
-  end), or a card in 13 swipeable styles: photo backgrounds, map backgrounds, a see-through
-  sticker and more. The card's title, numbers, photo and size can be edited.
-- **Advanced stats**: a switch on each ride page for speed, time, stop, elevation and effort
-  detail, worked out from the recorded points so it covers older rides too.
-- **Bike care**: jobs with kilometre or day intervals, notes and history; mark one done
-  today, on an earlier date or after a past ride. Also all rides on one map.
-- **Widgets**: Ride (start, pause, lap, live numbers), This week, Last ride, Riding stats.
+  records and best efforts. All rides on one map.
 - **Segments**: cut a stretch from any ride; every ride over it is timed and ranked.
-- **Export**: FIT, TCX and GPX files, or hand a FIT file to Strava through the share sheet.
-- **Health Connect**: heart rate and weight from Samsung Health or other apps.
+- **Share**: an animated 3D flyover video of the ride, or a card in 13 swipeable styles
+  with editable title, numbers, photo and size.
+- **Bike care**: jobs with kilometre or day intervals, notes and history. Mark one done
+  today, on an earlier date or after a past ride.
+- **Widgets**: Ride, This week, Last ride and Riding stats.
+- **Export**: FIT, TCX and GPX files, or send a FIT file to Strava through the share sheet.
+- **Health Connect**: heart rate and weight from Samsung Health or other apps. Read only.
 - **Offline maps**: save the map around you for rides without signal.
-- **First launch**: a short setup for location, background recording, bike type and
-  weekly goal.
-- **Settings**: a short list of sections (appearance, bike, recording, alerts and voice,
-  goals, Health Connect, maps and data, phone), with backup / restore of everything as
-  one zip, and an About page with what's new and licences.
+- **Backup and restore**: rides, routes, photos, segments, bike care and settings in one zip.
+- **Updates**: Settings → Updates checks GitHub for a newer version.
+- **First launch**: a short setup for location, background recording, bike type and goal.
 
-## Services used (all free, no API keys)
+</details>
 
-- Maps: MapLibre with OpenFreeMap tiles, optional CyclOSM layer (OpenStreetMap data)
-- Routing and elevation: BRouter public server (brouter.de)
-- Place search: Photon (photon.komoot.io)
-- Weather: Open-Meteo
-- Traffic signals: Overpass API (OpenStreetMap data)
+## Install
 
-These are shared community servers, fine for personal use. Maps, planning and weather
-need internet; recording does not.
+1. Download `Cycler-<version>.apk` from [Releases](https://github.com/Kunj-Company/cycler/releases)
+   on an Android 8.0+ phone and open it. Allow installing from your browser or files app
+   when asked.
+2. Later versions install over it and keep your rides. Open **Settings → Updates** to check.
 
-## Versions and Git
+Release builds are signed with Cycler's release key. Certificate SHA-256:
 
-Versions are numbered 0.1.N and tagged `v0.1.N`. Commits follow Conventional Commits
-(`feat`, `fix`, `build`, `test`, `docs`, `chore`), one topic per commit. `CHANGELOG.md`
-lists what each version added.
+    fc:11:15:05:4d:d6:ec:d2:21:b7:3c:a6:a1:52:28:dc:0b:45:a8:1b:63:fc:2b:9b:bf:30:fe:b9:0f:f7:d9:00
+
+Keep a backup now and then: **Settings → Maps and data → Back up everything**.
+
+## Privacy
+
+Rides, photos and settings stay in the app's own storage on your phone and are never
+uploaded. There is no account, no analytics and no ads. Only these requests leave the phone:
+
+| What | Sent to | When |
+|---|---|---|
+| Map tiles | OpenFreeMap, CyclOSM | Whenever a map is shown or saved for offline use; they see the area |
+| Weather | Open-Meteo | On the Ride screen; your position rounded to about 100 m |
+| Route planning | BRouter (brouter.de) | When you plan; the points you route between |
+| Place search | Photon (photon.komoot.io) | When you search; the text you type |
+| Traffic signals | Overpass API | When you open or follow a ride or route; its points |
+| Update check | GitHub (api.github.com) | Only when you tap **Check for updates** |
+
+These are free community servers with no API keys. Maps, planning and weather need
+internet; recording does not. The same list is in the app under **About → Privacy**.
+
+## Build from source
+
+Needs JDK 17 and the Android SDK (platform 36, build-tools 35/36).
+
+```sh
+./gradlew assembleDebug          # debug APK
+./gradlew testDebugUnitTest      # unit tests and screenshot renders
+```
+
+Or open the folder in Android Studio and press Run.
+
+Helpers in [`scripts/`](scripts):
+
+| Script | Does |
+|---|---|
+| `run-emulator.sh` | Starts the `cycler_api35` emulator and waits for it to boot |
+| `install-debug.sh` | Builds, installs and opens the debug APK with location granted |
+| `gps-ride.sh [min] [km/h]` | Feeds the emulator a moving GPS track, so a ride can be recorded |
+
+### Tests and screenshots without a phone
+
+`./gradlew testDebugUnitTest` checks the maths behind the numbers (distance, speed, GPS
+jumps, off-route, stats, heights) and backup safety, and renders every screen, light and
+dark, to `app/build/shots/` with made-up rides. The map is drawn as a sketch there; real
+tiles only appear on a device. The screenshots in this README come from those renders and
+from an emulator.
 
 ## Release builds
 
@@ -86,9 +166,11 @@ One-time setup (the key and its password never go into Git):
 
 1. Create the key, outside the repo:
 
-       mkdir -p ~/keystores && chmod 700 ~/keystores
-       keytool -genkeypair -v -keystore ~/keystores/cycler-upload.jks -storetype PKCS12 \
-         -alias cycler -keyalg RSA -keysize 2048 -validity 10000
+   ```sh
+   mkdir -p ~/keystores && chmod 700 ~/keystores
+   keytool -genkeypair -v -keystore ~/keystores/cycler-upload.jks -storetype PKCS12 \
+     -alias cycler -keyalg RSA -keysize 2048 -validity 10000
+   ```
 
 2. Copy `keystore.properties.example` to `keystore.properties` (git-ignored), fill in the
    path and password, then `chmod 600 keystore.properties`.
@@ -98,9 +180,11 @@ One-time setup (the key and its password never go into Git):
 
 Build and check:
 
-    ./gradlew assembleRelease bundleRelease
-    $ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs \
-      app/build/outputs/apk/release/app-release.apk
+```sh
+./gradlew assembleRelease bundleRelease
+$ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs \
+  app/build/outputs/apk/release/app-release.apk
+```
 
 - APK: `app/build/outputs/apk/release/app-release.apk` (for GitHub releases)
 - Bundle: `app/build/outputs/bundle/release/app-release.aab` (for Google Play)
@@ -110,49 +194,34 @@ Build and check:
 Updates install over the previous version, keeping its data, only when they are signed
 with the same key and have a higher `versionCode`. A debug build cannot be installed over
 a release build or the other way round. To move a phone from one to the other, back up in
-the app (Settings → Maps and data → Back up everything), uninstall, install, and restore.
+the app, uninstall, install, and restore.
 
 If Cycler goes on Google Play, enrol in Play App Signing and register this key as the
 upload key.
 
-## Design
+## Project layout
 
-Neutral surfaces, hairline borders, ink-coloured buttons, one blue accent, Inter type.
-Tokens live in `ui/Theme.kt`, shared pieces (buttons, segmented control, sheet, metrics,
-charts) in `ui/Common.kt`.
+| Path | What's there |
+|---|---|
+| `data/` | Models, geometry, JSON file storage, GPX, heights above sea level |
+| `data/Export.kt` | FIT and TCX writers |
+| `health/Health.kt` | Health Connect reads |
+| `net/` | BRouter, Photon, weather, traffic signals and the update check |
+| `share/` | Share cards, the flyover renderer and the MP4 encoder |
+| `track/TrackingService.kt` | Foreground GPS recording, auto-pause, off-route alerts |
+| `ui/` | Theme, components, screens and the map wrapper |
+| `widget/` | The four home-screen widgets |
+| `MainActivity.kt` | App shell and planning logic |
 
-## Tests and screenshots without a phone
+**Design:** neutral surfaces, hairline borders, ink-coloured buttons, one blue accent and
+Inter type. Tokens live in `ui/Theme.kt`; shared pieces (buttons, segmented control, sheet,
+metrics, charts) in `ui/Common.kt`.
 
-    ./gradlew testDebugUnitTest
-
-checks the distance, off-route and speed maths (`GeoTest`) and renders every screen, light and dark, to `app/build/shots/` using made-up rides.
-The map is drawn as a sketch there; real tiles only appear on a device.
-
-## Where things live
-
-- `data/` models, geometry, JSON file storage, GPX
-- `data/Export.kt` FIT and TCX writers
-- `health/Health.kt` Health Connect reads
-- `net/Net.kt` BRouter, Photon, weather and signals calls
-- `share/` the share card, the flyover renderer and the MP4 encoder
-- `track/TrackingService.kt` foreground GPS recording, auto-pause, off-route alerts
-- `ui/` theme, components, screens and the map wrapper
-- `MainActivity.kt` app shell and planning logic
-
-## Privacy
-
-Rides, photos and settings stay in the app's own storage on the phone and are never
-uploaded. There is no account and no analytics. Only these requests leave the phone:
-
-- **Map tiles**: the tile servers (OpenFreeMap, CyclOSM) see which map area you view.
-- **Weather** (Ride screen): your position rounded to 3 decimals (about 100 m) goes to Open-Meteo.
-- **Route planning**: the points you route between go to BRouter (brouter.de).
-- **Traffic signals**: when you open a ride or route, or follow one, its points go to the
-  Overpass API to find the traffic signals along it.
-- **Place search**: the text you type goes to Photon (photon.komoot.io).
-- **Update check**: only when you tap "Check for updates", the app contacts api.github.com.
+**Versions:** numbered 0.1.N and tagged `v0.1.N`. Commits follow Conventional Commits, one
+topic per commit. [CHANGELOG.md](CHANGELOG.md) lists what each version added.
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). Libraries, the Inter font and map data keep their own
-licences, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT, see [LICENSE](LICENSE). Developed by Abhiram N J. Libraries, the Inter font and map
+data keep their own licences, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Map data © OpenStreetMap contributors.
