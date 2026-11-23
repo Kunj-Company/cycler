@@ -145,6 +145,8 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     var guide by mutableStateOf<Route?>(null)
         private set
     var showSettings by mutableStateOf(false)
+    /** A Settings page to open directly, such as "privacy" from Health Connect. */
+    var settingsPage by mutableStateOf<String?>(null)
 
     var themeMode by mutableStateOf(prefs.themeMode)
     var autoPause by mutableStateOf(prefs.autoPause)
@@ -439,12 +441,24 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && ((intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
             handleWidgetIntent(intent)
         }
+        handlePrivacyIntent(intent, savedInstanceState)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleWidgetIntent(intent)
+        handlePrivacyIntent(intent, null)
+    }
+
+    /** Health Connect's "privacy policy" link: open the Privacy page in Settings. */
+    private fun handlePrivacyIntent(intent: Intent?, saved: android.os.Bundle?) {
+        if (saved != null || ((intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
+        val action = intent?.action ?: return
+        if (action != "androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" && action != "android.intent.action.VIEW_PERMISSION_USAGE") return
+        val vm = androidx.lifecycle.ViewModelProvider(this)[MainVm::class.java]
+        vm.settingsPage = "privacy"
+        vm.showSettings = true
     }
 
     private fun handleWidgetIntent(intent: Intent?) {
@@ -588,7 +602,8 @@ fun App(vm: MainVm) {
     }
     if (vm.showSettings) {
         BackHandler { vm.showSettings = false }
-        SettingsScreen(vm)
+        androidx.compose.runtime.DisposableEffect(Unit) { onDispose { vm.settingsPage = null } }
+        SettingsScreen(vm, startPage = vm.settingsPage)
         return
     }
     AppShell(vm, myLoc, granted, request)

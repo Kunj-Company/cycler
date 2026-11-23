@@ -69,7 +69,7 @@ private const val HUB = "hub"
 
 /** Where the back arrow on each page leads. */
 private fun parentOf(page: String) = when (page) {
-    "whatsnew", "licence", "notices" -> "about"
+    "whatsnew", "licence", "notices", "privacy" -> "about"
     else -> HUB
 }
 
@@ -84,6 +84,7 @@ private fun titleOf(page: String) = when (page) {
     "phone" -> "Phone"
     "about" -> "About"
     "updates" -> "Updates"
+    "privacy" -> "Privacy"
     "whatsnew" -> "What's new"
     "licence" -> "Licence"
     "notices" -> "Open-source notices"
@@ -351,6 +352,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
 
                         "about" -> AboutPage(version) { page = it }
                         "updates" -> UpdatesPage(version)
+                        "privacy" -> PrivacyPage()
                         "whatsnew" -> WhatsNewPage()
                         "licence" -> LicencePage()
                         "notices" -> NoticesPage()
@@ -511,6 +513,7 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     )
     Spacer(Modifier.height(20.dp))
     Hairline()
+    SimpleLinkRow("Privacy") { open("privacy") }
     SimpleLinkRow("What's new") { open("whatsnew") }
     SimpleLinkRow("Licence") { open("licence") }
     SimpleLinkRow("Open-source notices") { open("notices") }
@@ -583,6 +586,28 @@ private fun UpdatesPage(version: String) {
         "Checks github.com. Nothing else is sent.",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+@Composable
+private fun PrivacyPage() {
+    PageNote("What stays on this phone, and what goes online.")
+    val sections = listOf(
+        "On this phone" to "Your rides, photos and settings are stored only on this phone. There is no account, no analytics and no ads. Backups are files you save yourself.",
+        "Health Connect" to "If you connect it, Cycler reads heart rate and weight, to show on ride pages and estimate energy. It never writes to Health Connect and never shares what it reads.",
+        "Weather" to "On the Ride screen, your position rounded to about 100 m is sent to Open-Meteo to get the weather.",
+        "Route planning" to "The points of a route you plan are sent to BRouter.",
+        "Place search" to "What you type in search is sent to Photon.",
+        "Traffic signals" to "When you open a ride or route, or follow one, its points are sent to the Overpass API to find traffic signals along it.",
+        "Maps" to "Map tiles are downloaded from OpenFreeMap or CyclOSM, which sees the area you are looking at.",
+        "Updates" to "The update check contacts GitHub only when you tap Check for updates.",
+    )
+    sections.forEach { (title, body) ->
+        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
+        }
+        Hairline()
+    }
 }
 
 @Composable
