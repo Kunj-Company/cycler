@@ -28,6 +28,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.cycler.app.MainActivity
 import com.cycler.app.data.Geo
+import com.cycler.app.data.Altitude
 import com.cycler.app.data.GpsJump
 import com.cycler.app.data.LapMark
 import com.cycler.app.data.Workout
@@ -305,6 +306,8 @@ class TrackingService : Service(), LocationListener {
                 maxSpeedMs = s.maxSpeedMs.toDouble(),
                 elapsedS = s.elapsedMs(System.currentTimeMillis()) / 1000,
                 stops = s.stops,
+                // Raw GPS heights; the store converts them to heights above sea level.
+                alt = Altitude.GPS,
                 // Whatever was ridden after the last mark is the final lap.
                 laps = if (s.laps.isEmpty()) emptyList() else if (s.lapDistanceM > 20.0)
                     s.laps + LapMark(s.distanceM, s.movingMs, s.elapsedMs(System.currentTimeMillis())) else s.laps,

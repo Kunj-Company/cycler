@@ -44,6 +44,8 @@ data class RouteMeta(
     /** Heart rate from Health Connect, beats per minute; 0 when there is none. */
     val avgHr: Int = 0,
     val maxHr: Int = 0,
+    /** What the point heights are measured from: [Altitude.MSL] (sea level) or [Altitude.GPS] (raw, still to convert). */
+    val alt: String = Altitude.MSL,
 ) {
     val difficulty: Difficulty get() = Difficulty.of(distanceM, ascentM)
 }

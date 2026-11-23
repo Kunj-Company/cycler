@@ -25,6 +25,9 @@ class RouteStore private constructor(ctx: Context) {
     /** Set once the first load is done; every later reload (a save, rename, delete or restore) refreshes the home-screen widgets. */
     private var loaded = false
 
+    /** Set while rides with raw GPS heights are being converted; see [convertHeightsLater]. Must exist before [reload] first runs. */
+    private val converting = java.util.concurrent.atomic.AtomicBoolean(false)
+
     init { reload() }
 
     @Synchronized
@@ -51,6 +54,39 @@ class RouteStore private constructor(ctx: Context) {
         }
         _metas.value = list.sortedByDescending { it.createdAt }
         if (loaded) Widgets.updateAll(appContext) else loaded = true
+        convertHeightsLater()
+    }
+
+    /**
+     * Rides recorded with raw GPS heights get heights above sea level, on a background thread
+     * (the geoid lookup reads from disk). Needs Android 14+; on older phones the rides keep
+     * raw heights, marked as such, and are converted if the phone or a restore moves them on.
+     */
+    private fun convertHeightsLater() {
+        if (!Geoid.available) return
+        if (_metas.value.none { it.alt == Altitude.GPS }) return
+        if (!converting.compareAndSet(false, true)) return
+        Thread {
+            try {
+                val geoid = Geoid(appContext)
+                var changed = false
+                for (m in _metas.value.filter { it.alt == Altitude.GPS }) {
+                    val pts = synchronized(this) { readPoints(m.id) }
+                    val msl = Altitude.toMsl(pts, geoid::heightAt) ?: continue
+                    synchronized(this) {
+                        // Skip a ride that was deleted or changed while converting.
+                        val now = _metas.value.firstOrNull { it.id == m.id } ?: return@synchronized
+                        if (now.alt != Altitude.GPS) return@synchronized
+                        writeSafely(File(dir, "${m.id}.pts.json"), pointsToJson(msl))
+                        writeSafely(File(dir, "${m.id}.meta.json"), metaToJson(now.copy(alt = Altitude.MSL)).toString())
+                        changed = true
+                    }
+                }
+                if (changed) reload()
+            } finally {
+                converting.set(false)
+            }
+        }.start()
     }
 
     @Synchronized
@@ -63,6 +99,7 @@ class RouteStore private constructor(ctx: Context) {
         elapsedS: Long = 0,
         stops: Int = 0,
         laps: List<LapMark> = emptyList(),
+        alt: String = Altitude.MSL,
     ): String {
         val id = UUID.randomUUID().toString()
         val meta = RouteMeta(
@@ -71,15 +108,9 @@ class RouteStore private constructor(ctx: Context) {
             maxSpeedMs, elapsedS, Geo.simplify(pts), stops,
             if (type == RouteType.RECORDED) Geo.bestEfforts(pts) else emptyMap(), FORMAT,
             laps = laps,
+            alt = alt,
         )
-        val arr = JSONArray()
-        for (p in pts) {
-            val a = JSONArray().put(p.lat).put(p.lon)
-            a.put(if (p.ele.isNaN()) JSONObject.NULL else p.ele)
-            a.put(p.t)
-            arr.put(a)
-        }
-        writeSafely(File(dir, "$id.pts.json"), arr.toString())
+        writeSafely(File(dir, "$id.pts.json"), pointsToJson(pts))
         writeSafely(File(dir, "$id.meta.json"), metaToJson(meta).toString())
         reload()
         return id
@@ -89,6 +120,17 @@ class RouteStore private constructor(ctx: Context) {
         val meta = _metas.value.firstOrNull { it.id == id } ?: return null
         val pts = readPoints(id)
         return if (pts.isEmpty()) null else Route(meta, pts)
+    }
+
+    private fun pointsToJson(pts: List<Pt>): String {
+        val arr = JSONArray()
+        for (p in pts) {
+            val a = JSONArray().put(p.lat).put(p.lon)
+            a.put(if (p.ele.isNaN()) JSONObject.NULL else p.ele)
+            a.put(p.t)
+            arr.put(a)
+        }
+        return arr.toString()
     }
 
     private fun readPoints(id: String): List<Pt> {
@@ -391,6 +433,7 @@ class RouteStore private constructor(ctx: Context) {
         val id = save(
             "Recovered ride", RouteType.RECORDED, pts, dur,
             ascentM = Geo.ascent(pts, 4.0, smooth = true), createdAt = pts.first().t, elapsedS = dur,
+            alt = Altitude.GPS,
         )
         // Only now is it safe to drop the raw recording.
         recordingFile.delete()
@@ -417,6 +460,7 @@ class RouteStore private constructor(ctx: Context) {
         .put("stops", m.stops).put("v", m.v)
         .put("notes", m.notes).put("feeling", m.feeling).put("tags", JSONArray(m.tags))
         .put("avgHr", m.avgHr).put("maxHr", m.maxHr)
+        .put("alt", m.alt)
         .put("laps", JSONArray().also { a -> m.laps.forEach { a.put(JSONArray().put(it.distanceM).put(it.movingMs).put(it.elapsedMs)) } })
         .put("bests", JSONObject().also { o -> m.bests.forEach { (k, s) -> o.put(k.toString(), s) } })
 
@@ -443,7 +487,10 @@ class RouteStore private constructor(ctx: Context) {
             }
         }.getOrNull() ?: emptyList(),
         o.optInt("avgHr", 0), o.optInt("maxHr", 0),
-    )
+    ).let { m ->
+        val alt = o.optString("alt", "")
+        m.copy(alt = if (alt == Altitude.GPS || alt == Altitude.MSL) alt else Altitude.legacy(m.type, m.elapsedS))
+    }
 
     companion object {
         private const val FORMAT = 2
