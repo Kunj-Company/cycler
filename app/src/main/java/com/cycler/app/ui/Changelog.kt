@@ -6,6 +6,18 @@ object Changelog {
 
     val versions: List<Version> = listOf(
         Version(
+            "0.1.10",
+            listOf(
+                "Check for updates in Settings → Updates.",
+                "About links to the source code on GitHub, and a new Privacy page says what leaves the phone.",
+                "Backups now include your settings.",
+                "GPS jumps no longer add distance or spoil your average speed and records.",
+                "Safer restore from backups.",
+                "The OpenStreetMap credit is visible on the Ride screen again.",
+                "Signed release build, about half the size.",
+            ),
+        ),
+        Version(
             "0.1.9",
             listOf(
                 "A short setup the first time you open the app.",

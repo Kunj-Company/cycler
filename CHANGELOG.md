@@ -2,6 +2,27 @@
 
 All notable changes to Cycler. Versions are tagged in Git as `v0.1.N`.
 
+## 0.1.10
+
+First release on GitHub, signed with the release key.
+
+### Added
+- Settings → Updates: check GitHub for a newer version and download it.
+- About links to the source code and releases on GitHub.
+- A Privacy page listing exactly what leaves the phone; Health Connect's privacy link opens it.
+- Backups include your settings (bike, goal, recording, voice, ride screen and theme).
+
+### Fixed
+- GPS jumps (a bad fix, a tunnel) no longer add distance or inflate average speed and records.
+- Restoring a backup only accepts files a Cycler backup contains, with size limits, so a
+  damaged or crafted zip cannot overwrite or delete other data.
+- The OpenStreetMap credit on the Ride screen is no longer hidden behind the bottom panel.
+- The setup page said location is never sent anywhere; it now says what is sent and why.
+
+### Changed
+- Release builds are signed with a release key and shrunk with R8 (about half the size).
+  Earlier debug-signed builds must be uninstalled first; back up in the app beforehand.
+
 ## 0.1.9
 
 ### Added
