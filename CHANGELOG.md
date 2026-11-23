@@ -2,15 +2,37 @@
 
 All notable changes to Cycler. Versions are tagged in Git as `v0.1.N`.
 
-## Unreleased
+## 0.1.12
+
+Prepared for Google Play. Same release key as 0.1.10 and 0.1.11.
+
+### Fixed
+- If Android stops the app during a ride, recording now restarts by itself and keeps your
+  laps; if it can't, the ride so far is saved and you are told. A ride that can't be saved
+  no longer makes the app crash every time you open it.
+- Time spent in a tunnel or under heavy cover now counts as riding time, and distance moved
+  while paused no longer disagrees with the saved track.
+- The map works on phones without Vulkan graphics (the app crashed at start on some).
+- GPX files with bad coordinates, and settings restored from a backup, can no longer crash
+  the app.
+- Elevation above sea level now also works on Android 8 to 13.
+- Exported files stay valid when a ride name contains odd characters.
+- Other apps can no longer start a ride through the widget.
 
 ### Changed
-- Removed the in-app update check and the Updates page. Nothing opens an APK download.
-- Android cloud backup is off (`allowBackup="false"`); the in-app zip backup is the only backup.
-- The Privacy page, onboarding text and README now state exactly what each online request sends.
-- Place search sends your position rounded to about 1 km (2 decimals) instead of 4 decimals.
-- Added a standalone privacy policy in `docs/PRIVACY.md`, linked from About.
-- Neutral wording for file export in the README and onboarding.
+- Targets Android 16 (API 36).
+- The in-app update check and the Updates page are gone. Download a new version from the
+  Releases page and install it over the old one; your rides are kept.
+- Android cloud backup is off. Use Back up everything in Settings to save a file yourself.
+- The Privacy page lists exactly what each online request sends, and there is a standalone
+  policy in `docs/PRIVACY.md`.
+- Place search sends your position rounded to about 1 km instead of 100 m.
+- Routing errors say what happened in plain words, with a Retry button.
+- Discard asks for a second confirmation. Typed notes, the big-number screen and exports
+  survive rotating the phone. The ride notification has Pause and Finish buttons.
+- The map retries by itself when the signal comes back.
+- Screen-reader labels for tabs, selections and charts, and stronger text contrast.
+- A themed (monochrome) launcher icon.
 
 ## 0.1.11
 

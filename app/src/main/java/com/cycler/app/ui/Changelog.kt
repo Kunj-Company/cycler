@@ -6,12 +6,17 @@ object Changelog {
 
     val versions: List<Version> = listOf(
         Version(
-            "Unreleased",
+            "0.1.12",
             listOf(
-                "The in-app update check is gone; updates now come from the store you installed from.",
+                "A ride now keeps recording if Android stops the app, and an interrupted ride is saved and shown.",
+                "Time in tunnels counts as riding time; distance while paused matches the saved track.",
+                "Works on phones without Vulkan graphics, and elevation above sea level works on Android 8 to 13.",
+                "Bad GPX files and backups can no longer crash the app; other apps can't start a ride through the widget.",
+                "The update check is gone. Download new versions from the Releases page on GitHub.",
                 "Android cloud backup is off. Use Back up everything to save a file yourself.",
-                "The Privacy page now lists exactly what each online request sends.",
-                "Place search sends your position rounded to about 1 km instead of 100 m.",
+                "The Privacy page lists exactly what each online request sends.",
+                "Clearer error messages with Retry, confirmation before Discard, and your notes survive rotating the phone.",
+                "Screen-reader labels and stronger text contrast.",
             ),
         ),
         Version(
