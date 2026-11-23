@@ -32,6 +32,8 @@ class RouteStore private constructor(ctx: Context) {
         val list = dir.listFiles { f -> f.name.endsWith(".meta.json") }.orEmpty().mapNotNull { f ->
             runCatching {
                 var m = metaFromJson(JSONObject(f.readText()))
+                // A file whose id isn't a plain id could point outside the app's folders; ignore it.
+                if (!isSafeId(m.id)) return@runCatching null
                 if (m.thumb.isEmpty() || m.v < FORMAT) {
                     // Saved by an older version: fill in the outline and best efforts once.
                     val pts = readPoints(m.id)
@@ -90,6 +92,7 @@ class RouteStore private constructor(ctx: Context) {
     }
 
     private fun readPoints(id: String): List<Pt> {
+        if (!isSafeId(id)) return emptyList()
         val f = File(dir, "$id.pts.json")
         if (!f.exists()) return emptyList()
         return runCatching {
@@ -124,6 +127,7 @@ class RouteStore private constructor(ctx: Context) {
 
     @Synchronized
     fun delete(id: String) {
+        if (!isSafeId(id)) return
         File(dir, "$id.meta.json").delete()
         File(dir, "$id.pts.json").delete()
         File(dir, "$id.hr.json").delete()
@@ -133,13 +137,14 @@ class RouteStore private constructor(ctx: Context) {
 
     // --- Heart rate for a ride, from Health Connect: [epoch millis, bpm] pairs in <id>.hr.json ---
 
-    fun heartRate(id: String): List<Pair<Long, Int>> = runCatching {
+    fun heartRate(id: String): List<Pair<Long, Int>> = if (!isSafeId(id)) emptyList() else runCatching {
         val a = JSONArray(File(dir, "$id.hr.json").readText())
         (0 until a.length()).map { i -> a.getJSONArray(i).let { it.getLong(0) to it.getInt(1) } }
     }.getOrDefault(emptyList())
 
     @Synchronized
     fun saveHeartRate(id: String, samples: List<Pair<Long, Int>>) {
+        if (!isSafeId(id)) return
         val meta = _metas.value.firstOrNull { it.id == id } ?: return
         if (samples.isEmpty()) return
         val a = JSONArray()
@@ -161,6 +166,7 @@ class RouteStore private constructor(ctx: Context) {
     fun segments(): List<SegmentFile> = segDir.listFiles { f -> f.name.endsWith(".json") }.orEmpty().mapNotNull { f ->
         runCatching {
             val o = JSONObject(f.readText())
+            if (!isSafeId(o.getString("id"))) return@runCatching null
             val p = o.getJSONArray("pts")
             val pts = (0 until p.length()).map { i -> p.getJSONArray(i).let { Pt(it.getDouble(0), it.getDouble(1)) } }
             val e = o.optJSONArray("efforts") ?: JSONArray()
@@ -193,6 +199,7 @@ class RouteStore private constructor(ctx: Context) {
 
     @Synchronized
     fun deleteSegment(id: String) {
+        if (!isSafeId(id)) return
         File(segDir, "$id.json").delete()
         _segTick.value++
     }
@@ -235,13 +242,14 @@ class RouteStore private constructor(ctx: Context) {
     /** Changes whenever any ride's media changes, so lists can refresh. */
     val mediaTick: StateFlow<Int> = _mediaTick
 
-    fun mediaDir(id: String) = File(mediaRoot, id)
+    /** The folder holding a ride's media. An id that isn't a plain id gets a folder that never exists. */
+    fun mediaDir(id: String) = File(mediaRoot, if (isSafeId(id)) id else ".invalid")
 
     fun media(id: String): List<File> =
         mediaDir(id).listFiles()?.filter { it.isFile && !it.name.endsWith(".tmp") }?.sortedBy { it.name } ?: emptyList()
 
     /** Copy a picked photo or video into the ride's folder. */
-    fun addMedia(id: String, resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean = runCatching {
+    fun addMedia(id: String, resolver: android.content.ContentResolver, uri: android.net.Uri): Boolean = isSafeId(id) && runCatching {
         val video = resolver.getType(uri)?.startsWith("video") == true
         val d = mediaDir(id).apply { mkdirs() }
         val target = File(d, "${System.currentTimeMillis()}_${(0..999).random()}." + if (video) "mp4" else "jpg")
@@ -287,7 +295,10 @@ class RouteStore private constructor(ctx: Context) {
         return count
     }
 
-    /** Bring back rides from a backup zip made by [exportAll]. Existing rides are kept. Returns how many files were restored. */
+    /**
+     * Bring back rides from a backup zip made by [exportAll]. Existing rides are kept. Returns how many
+     * files were restored. Only entries with plain ids and names, inside their size limits, are accepted.
+     */
     fun importAll(input: java.io.InputStream, onExtra: (name: String, text: String) -> Unit = { _, _ -> }): Int {
         val root = dir.parentFile ?: return 0
         val base = root.canonicalPath + File.separator
@@ -295,20 +306,22 @@ class RouteStore private constructor(ctx: Context) {
         java.util.zip.ZipInputStream(input).use { zip ->
             while (true) {
                 val e = zip.nextEntry ?: break
-                if (!e.isDirectory && e.name.startsWith("settings/") && e.size < 1_000_000) {
-                    val text = zip.readBytes().toString(Charsets.UTF_8)
-                    runCatching { onExtra(e.name.removePrefix("settings/"), text) }
-                    n++
+                if (e.isDirectory) { zip.closeEntry(); continue }
+                if (e.name.startsWith("settings/")) {
+                    val bytes = readLimited(zip, MAX_SETTINGS_BYTES)
+                    if (bytes != null) {
+                        runCatching { onExtra(e.name.removePrefix("settings/"), bytes.toString(Charsets.UTF_8)) }
+                        n++
+                    }
                     zip.closeEntry()
                     continue
                 }
-                val wanted = e.name.startsWith("routes/") || e.name.startsWith("media/") || e.name.startsWith("segments/")
+                val limit = entryLimit(e.name)
                 val target = File(root, e.name)
                 // Only files that land inside the app's own folder are accepted.
-                if (!e.isDirectory && wanted && target.canonicalPath.startsWith(base)) {
+                if (limit != null && target.canonicalPath.startsWith(base)) {
                     target.parentFile?.mkdirs()
-                    target.outputStream().use { zip.copyTo(it) }
-                    n++
+                    if (copyLimited(zip, target, limit)) n++
                 }
                 zip.closeEntry()
             }
@@ -317,6 +330,45 @@ class RouteStore private constructor(ctx: Context) {
         _mediaTick.value++
         _segTick.value++
         return n
+    }
+
+    /** Reads at most [limit] bytes; null if the entry is bigger (the rest is left unread). */
+    private fun readLimited(input: java.io.InputStream, limit: Long): ByteArray? {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        var total = 0L
+        while (true) {
+            val r = input.read(buf)
+            if (r < 0) break
+            total += r
+            if (total > limit) return null
+            out.write(buf, 0, r)
+        }
+        return out.toByteArray()
+    }
+
+    /** Copies to [target] via a temporary file, counting bytes as they go; false (nothing kept) past [limit]. */
+    private fun copyLimited(input: java.io.InputStream, target: File, limit: Long): Boolean {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        var ok = false
+        try {
+            tmp.outputStream().use { out ->
+                val buf = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val r = input.read(buf)
+                    if (r < 0) { ok = true; break }
+                    total += r
+                    if (total > limit) break
+                    out.write(buf, 0, r)
+                }
+            }
+            if (ok && !tmp.renameTo(target)) { target.delete(); ok = tmp.renameTo(target) }
+        } catch (e: java.io.IOException) {
+            ok = false
+        }
+        if (!ok) tmp.delete()
+        return ok
     }
 
     /** If the app died mid-ride, turn the leftover points into a saved ride. */
@@ -395,6 +447,27 @@ class RouteStore private constructor(ctx: Context) {
 
     companion object {
         private const val FORMAT = 2
+        /** Ride and segment ids are UUIDs; anything else must never become part of a path. */
+        private val SAFE_ID = Regex("[A-Za-z0-9_-]{1,64}")
+        private val ROUTE_FILE = Regex("[A-Za-z0-9_-]{1,64}\\.(meta|pts|hr)\\.json")
+        private val SEGMENT_FILE = Regex("[A-Za-z0-9_-]{1,64}\\.json")
+        private val MEDIA_FILE = Regex("[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}")
+        internal const val MAX_SETTINGS_BYTES = 1_000_000L
+        internal const val MAX_JSON_BYTES = 50L * 1024 * 1024
+        internal const val MAX_MEDIA_BYTES = 1024L * 1024 * 1024
+
+        fun isSafeId(id: String?): Boolean = id != null && SAFE_ID.matches(id)
+
+        /** The size limit for a backup entry that may be restored, or null if its path isn't acceptable. */
+        internal fun entryLimit(name: String): Long? {
+            val parts = name.split('/')
+            return when (parts.firstOrNull()) {
+                "routes" -> if (parts.size == 2 && ROUTE_FILE.matches(parts[1])) MAX_JSON_BYTES else null
+                "segments" -> if (parts.size == 2 && SEGMENT_FILE.matches(parts[1])) MAX_JSON_BYTES else null
+                "media" -> if (parts.size == 3 && isSafeId(parts[1]) && MEDIA_FILE.matches(parts[2])) MAX_MEDIA_BYTES else null
+                else -> null
+            }
+        }
         @Volatile private var inst: RouteStore? = null
         /** For tests only: forget the shared instance so the next get() starts clean. */
         internal fun resetForTests() { inst = null }
