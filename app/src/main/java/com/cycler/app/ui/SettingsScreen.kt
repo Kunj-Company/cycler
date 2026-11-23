@@ -598,7 +598,7 @@ private fun PrivacyPage() {
         "Route planning" to "The points of a route you plan are sent to BRouter.",
         "Place search" to "What you type in search is sent to Photon.",
         "Traffic signals" to "When you open a ride or route, or follow one, its points are sent to the Overpass API to find traffic signals along it.",
-        "Maps" to "Map tiles are downloaded from OpenFreeMap or CyclOSM, which sees the area you are looking at.",
+        "Maps" to "Map tiles come from OpenFreeMap or CyclOSM, so they see the area you are looking at, including maps you save for offline use.",
         "Updates" to "The update check contacts GitHub only when you tap Check for updates.",
     )
     sections.forEach { (title, body) ->
