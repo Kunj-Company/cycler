@@ -141,9 +141,15 @@ The map is drawn as a sketch there; real tiles only appear on a device.
 
 ## Privacy
 
-Rides, photos and settings stay in the app's own storage on the phone. The app has no
-analytics and no account. It talks to the map, routing, search and weather services
-listed above, which see the places you ask them about, as any map app's servers do.
+Rides, photos and settings stay in the app's own storage on the phone and are never
+uploaded. There is no account and no analytics. Only these requests leave the phone:
+
+- **Map tiles**: the tile servers (OpenFreeMap, CyclOSM) see which map area you view.
+- **Weather** (Ride screen): your position rounded to 3 decimals (about 100 m) goes to Open-Meteo.
+- **Route planning**: the points you route between go to BRouter (brouter.de); traffic-signal
+  lookups send the route's area to the Overpass API.
+- **Place search**: the text you type goes to Photon (photon.komoot.io).
+- **Update check**: only when you tap "Check for updates", the app contacts api.github.com.
 
 ## Licence
 

@@ -246,7 +246,8 @@ private fun LocationStep(granted: Boolean) {
     StepHeader(
         Icons.Outlined.LocationOn, "Turn on location",
         "Cycler needs your location to show where you are on the map and to record your rides. " +
-            "It stays on this phone and is never sent anywhere.",
+            "Your rides stay on this phone. For the weather, a rounded position (about 100 m) is sent to Open-Meteo, " +
+            "and route planning uses online map services.",
     )
     Spacer(Modifier.height(20.dp))
     Text(
