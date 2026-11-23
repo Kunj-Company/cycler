@@ -27,6 +27,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.cycler.app.MainActivity
+import com.cycler.app.R
+import java.io.File
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Altitude
 import com.cycler.app.data.GpsJump
@@ -159,6 +161,7 @@ class TrackingService : Service(), LocationListener {
             Locale.US, "Lap %d: %.2f km in %d:%02d", n, s.lapDistanceM / 1000, s.lapMovingMs / 60000, s.lapMovingMs / 1000 % 60,
         )
         state.update { it.copy(laps = it.laps + mark, notice = text) }
+        record(String.format(Locale.US, "#L,%.1f,%d,%d\n", mark.distanceM, mark.movingMs, mark.elapsedMs))
         buzz(longArrayOf(0, 120))
         if (auto && ttsReady) runCatching { tts?.speak("Lap $n", TextToSpeech.QUEUE_ADD, null, "lap") }
     }
@@ -171,10 +174,15 @@ class TrackingService : Service(), LocationListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        if (intent == null) {
+            // The system restarted the service after killing the app: carry on with the ride from recording.csv.
+            resumeAfterKill()
+            return START_STICKY
+        }
+        when (intent.action) {
             ACTION_START -> begin()
             // The other actions only make sense while a ride is running.
-            else -> if (state.value.status == TrackStatus.IDLE) stopSelf() else when (intent?.action) {
+            else -> if (state.value.status == TrackStatus.IDLE) stopSelf() else when (intent.action) {
                 ACTION_LAP -> markLap(auto = false)
                 ACTION_PAUSE -> pause()
                 ACTION_RESUME -> resume()
@@ -182,7 +190,7 @@ class TrackingService : Service(), LocationListener {
                 ACTION_DISCARD -> finish(null, save = false)
             }
         }
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     @SuppressLint("MissingPermission", "WakelockTimeout")
@@ -190,18 +198,25 @@ class TrackingService : Service(), LocationListener {
         val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
         try {
             // Always go foreground first: Android requires it after startForegroundService().
-            ServiceCompat.startForeground(this, NOTIF_ID, notification("Waiting for GPS…"), type)
+            ServiceCompat.startForeground(this, NOTIF_ID, notification(getString(R.string.rec_waiting_gps)), type)
             if (state.value.status != TrackStatus.IDLE) return
             lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())
         } catch (e: Exception) {
             // No precise-location permission or no GPS: nothing to record. Tell the rider why.
-            state.update { it.copy(notice = "Couldn't start: Cycler needs precise location. Check the app's location permission.") }
+            state.update { it.copy(notice = getString(R.string.rec_no_permission)) }
             runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
             stopSelf()
             return
         }
         acquireWakeLock()
-        RouteStore.get(this).recordingFile.delete()
+        // An earlier ride that could not be saved yet must never be overwritten by a new one.
+        val store = RouteStore.get(this)
+        if (store.recordingFile.exists() && store.recoverUnfinishedResult() == RouteStore.Recovery.Failed) {
+            runCatching {
+                store.recordingFile.renameTo(File(store.recordingFile.parentFile, "recording-unsaved-${System.currentTimeMillis()}.csv"))
+            }
+        }
+        store.recordingFile.delete()
         onRouteSeen = false
         lastCued = null
         lastFix = null
@@ -209,17 +224,9 @@ class TrackingService : Service(), LocationListener {
         stillSince = 0L
         offCount = 0
         lastSpokenKm = 0
-        val prefs = Prefs(this)
-        autoPauseOn = prefs.autoPause
-        offRouteAlertOn = prefs.offRouteAlert
-        turnCuesOn = prefs.turnCues
-        voiceEveryKm = prefs.voiceEveryKm.coerceAtLeast(1)
-        voiceKmOn = prefs.voice
-        pauseAfterMs = when (prefs.autoPauseLevel) { 0 -> 8000L; 2 -> 2500L; else -> 4000L }
-        autoLapM = prefs.autoLapKm * 1000.0
-        lastWorkoutStep = -2
+        loadPrefs()
         // A workout needs its prompts spoken even if kilometre updates are off.
-        if (prefs.voice || workout != null) {
+        if (voiceKmOn || workout != null) {
             tts = TextToSpeech(applicationContext) { status ->
                 ttsReady = status == TextToSpeech.SUCCESS &&
                     runCatching { (tts?.setLanguage(Locale.US) ?: -2) >= TextToSpeech.LANG_AVAILABLE }.getOrDefault(false)
@@ -235,6 +242,63 @@ class TrackingService : Service(), LocationListener {
         if (workout != null) ticker.postDelayed(tick, 1000)
         lastWidgetUpdate = System.currentTimeMillis()
         Widgets.updateAll(this)
+    }
+
+    private fun loadPrefs() {
+        val prefs = Prefs(this)
+        autoPauseOn = prefs.autoPause
+        offRouteAlertOn = prefs.offRouteAlert
+        turnCuesOn = prefs.turnCues
+        voiceEveryKm = prefs.voiceEveryKm.coerceAtLeast(1)
+        voiceKmOn = prefs.voice
+        pauseAfterMs = when (prefs.autoPauseLevel) { 0 -> 8000L; 2 -> 2500L; else -> 4000L }
+        autoLapM = prefs.autoLapKm * 1000.0
+        lastWorkoutStep = -2
+    }
+
+    /**
+     * START_STICKY restart after the process was killed. Android 12+ may refuse to start a location
+     * foreground service from the background; then nothing is lost: recording.csv stays and the next
+     * launch saves it as an interrupted ride.
+     */
+    @SuppressLint("MissingPermission")
+    private fun resumeAfterKill() {
+        if (state.value.status != TrackStatus.IDLE) return
+        val rec = runCatching { RouteStore.get(this).readRecording() }.getOrNull()
+        if (rec == null || rec.pts.size < 2) { stopSelf(); return }
+        val type = if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0
+        try {
+            ServiceCompat.startForeground(this, NOTIF_ID, notification(getString(R.string.rec_continued_after_kill)), type)
+            if (!rec.paused) lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this, Looper.getMainLooper())
+        } catch (e: Exception) {
+            runCatching { lm.removeUpdates(this) }
+            runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+            stopSelf()
+            return
+        }
+        if (!rec.paused) acquireWakeLock()
+        onRouteSeen = false; lastCued = null; lastFix = null; stillSince = 0L; offCount = 0
+        loadPrefs()
+        // The first point after the restart starts a new segment: the gap is not counted as distance.
+        skipNextSegment = true
+        val distance = Geo.length(rec.pts)
+        val now = System.currentTimeMillis()
+        lastSpokenKm = (distance / 1000).toInt()
+        state.value = TrackState(
+            status = if (rec.paused) TrackStatus.PAUSED else TrackStatus.RECORDING,
+            points = rec.pts, distanceM = distance, movingMs = rec.movingMs, activeMs = rec.elapsedMs, resumedAt = now,
+            maxSpeedMs = rec.maxSpeedMs.toFloat(), stops = rec.stops, laps = rec.laps,
+            guideTotalM = guideCum?.lastOrNull() ?: 0.0,
+            gpsOff = !runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(true),
+            notice = getString(R.string.rec_continued_after_kill),
+        )
+        lastWidgetUpdate = now
+        Widgets.updateAll(this)
+    }
+
+    /** Appends to recording.csv, the crash-safe copy of the ride. */
+    private fun record(text: String) {
+        runCatching { RouteStore.get(this).recordingFile.appendText(text) }
     }
 
     @SuppressLint("WakelockTimeout")
@@ -258,7 +322,9 @@ class TrackingService : Service(), LocationListener {
         // No GPS or wake lock while paused: a long cafe stop shouldn't drain the battery.
         runCatching { lm.removeUpdates(this) }
         releaseWakeLock()
-        notify("Paused")
+        val ps = state.value
+        record(String.format(Locale.US, "#P,%d,%d,%d\n", now, ps.movingMs, ps.activeMs))
+        notify(getString(R.string.rec_paused))
         Widgets.updateAll(this)
     }
 
@@ -278,6 +344,8 @@ class TrackingService : Service(), LocationListener {
             if (it.status != TrackStatus.PAUSED) it
             else it.copy(status = TrackStatus.RECORDING, resumedAt = System.currentTimeMillis())
         }
+        record("#R,${System.currentTimeMillis()}\n")
+        notify(String.format(Locale.US, getString(R.string.rec_progress), state.value.distanceM / 1000, 0f))
         Widgets.updateAll(this)
     }
 
@@ -293,7 +361,7 @@ class TrackingService : Service(), LocationListener {
         var id: String? = null
         var notice: String? = null
         val store = RouteStore.get(this)
-        if (save && s.points.size < 2) notice = "Too short to save: no distance was recorded."
+        if (save && s.points.size < 2) notice = getString(R.string.rec_too_short)
         if (save && s.points.size >= 2) try {
             id = store.save(
                 name = name ?: "Ride",
@@ -314,7 +382,7 @@ class TrackingService : Service(), LocationListener {
             )
         } catch (e: Exception) {
             // Keep the raw recording so the ride can be recovered on the next launch.
-            notice = "Couldn't save the ride just now. It will be recovered next time you open Cycler."
+            notice = getString(R.string.rec_save_failed)
         }
         if (id != null || !save || s.points.size < 2) store.recordingFile.delete()
         state.value = TrackState(savedId = id, notice = notice)
@@ -335,11 +403,20 @@ class TrackingService : Service(), LocationListener {
         if (prev != null) {
             val dt = loc.time - prev.time
             if (!loc.hasSpeed() && dt > 0) speed = prev.distanceTo(loc) / (dt / 1000f)
-            if (speed > 0.7f && dt in 1..10000) movingAdd = dt
+            if (dt in 1..10000) {
+                if (speed > 0.7f) movingAdd = dt
+            } else if (dt > 10000) {
+                // A long gap (tunnel, poor reception): the time counts as riding if the distance fits cycling.
+                movingAdd = GpsJump.gapMovingMs(prev.distanceTo(loc).toDouble(), dt)
+            }
         }
 
-        val pt = Pt(loc.latitude, loc.longitude, if (loc.hasAltitude()) loc.altitude else Double.NaN, loc.time)
         val last = s.points.lastOrNull()
+        // The first point after a manual pause or a restart starts a new segment of the track.
+        val pt = Pt(
+            loc.latitude, loc.longitude, if (loc.hasAltitude()) loc.altitude else Double.NaN, loc.time,
+            brk = last != null && skipNextSegment,
+        )
         val gap = if (last == null) 0.0 else Geo.dist(last, pt)
         // Only keep a new point after really moving: GPS wanders several metres while you
         // stand at a signal, and that must not count as distance.
@@ -348,14 +425,7 @@ class TrackingService : Service(), LocationListener {
         val jump = last != null && GpsJump.isJump(gap, pt.t - last.t)
         val addDist = GpsJump.addedDistance(gap, pt.t - (last?.t ?: pt.t), keep, skipNextSegment)
         if (jump) movingAdd = 0L
-        if (keep) {
-            skipNextSegment = false
-            runCatching {
-                RouteStore.get(this).recordingFile.appendText(
-                    String.format(Locale.US, "%.6f,%.6f,%.1f,%d\n", pt.lat, pt.lon, pt.ele, pt.t)
-                )
-            }
-        }
+        if (keep) skipNextSegment = false
         // Auto-pause: a few seconds below walking pace counts as stopped.
         if (speed < 0.8f) {
             if (stillSince == 0L) stillSince = loc.time
@@ -364,6 +434,16 @@ class TrackingService : Service(), LocationListener {
         val atSignal = signals.any { Geo.dist(it, pt) < 45.0 }
         val paused = autoPauseOn && stillSince != 0L && loc.time - stillSince >= (if (atSignal) minOf(1500L, pauseAfterMs) else pauseAfterMs)
         val newStop = paused && !s.autoPaused
+        val maxNow = if (speedTrusted(loc) && speed < 28f) maxOf(s.maxSpeedMs, speed) else s.maxSpeedMs
+        if (keep) {
+            // The ride state goes on the same line as the point, so a recovered ride keeps its times, top speed and stops.
+            record(
+                String.format(
+                    Locale.US, "%.6f,%.6f,%.1f,%d,%d,%d,%.2f,%d,%d\n", pt.lat, pt.lon, pt.ele, pt.t, if (pt.brk) 1 else 0,
+                    s.movingMs + movingAdd, maxNow, s.stops + if (newStop) 1 else 0, s.elapsedMs(System.currentTimeMillis()),
+                )
+            )
+        }
 
         // Following a route: how far off it are we, and how far along?
         var off: Double? = null
@@ -397,7 +477,7 @@ class TrackingService : Service(), LocationListener {
                 distanceM = it.distanceM + addDist,
                 movingMs = it.movingMs + movingAdd,
                 speedMs = if (paused) 0f else speed,
-                maxSpeedMs = if (speedTrusted(loc) && speed < 28f) maxOf(it.maxSpeedMs, speed) else it.maxSpeedMs,
+                maxSpeedMs = maxOf(it.maxSpeedMs, maxNow),
                 gpsOff = false,
                 autoPaused = paused,
                 guideOffM = off,
@@ -437,7 +517,7 @@ class TrackingService : Service(), LocationListener {
         val now = System.currentTimeMillis()
         if (now - lastNotify > 5000) {
             lastNotify = now
-            notify(String.format(Locale.US, "%.2f km · %.1f km/h", state.value.distanceM / 1000, speed * 3.6f))
+            notify(String.format(Locale.US, getString(R.string.rec_progress), state.value.distanceM / 1000, speed * 3.6f))
         }
         // The home-screen widgets show live numbers, but a refresh every fix would be wasteful.
         if (now - lastWidgetUpdate > 10_000) {
@@ -455,7 +535,7 @@ class TrackingService : Service(), LocationListener {
     override fun onProviderDisabled(provider: String) {
         if (provider == LocationManager.GPS_PROVIDER && state.value.status != TrackStatus.IDLE) {
             state.update { it.copy(gpsOff = true) }
-            notify("Location is off. Turn it on to keep recording.")
+            notify(getString(R.string.rec_location_off))
         }
     }
 
@@ -469,8 +549,12 @@ class TrackingService : Service(), LocationListener {
         runCatching { tts?.shutdown() }
         if (state.value.status != TrackStatus.IDLE) {
             // The system ended the service mid-ride. Save what was recorded instead of leaving the UI frozen.
-            val id = runCatching { RouteStore.get(this).recoverUnfinished() }.getOrNull()
-            state.value = TrackState(savedId = id, notice = "Recording stopped unexpectedly. Your ride so far was saved.")
+            val r = runCatching { RouteStore.get(this).recoverUnfinishedResult() }.getOrNull()
+            val id = (r as? RouteStore.Recovery.Saved)?.id
+            state.value = TrackState(
+                savedId = id,
+                notice = getString(if (r is RouteStore.Recovery.Failed) R.string.rec_recover_failed else R.string.rec_stopped_unexpectedly),
+            )
             Widgets.updateAll(this)
         }
         super.onDestroy()
@@ -499,17 +583,28 @@ class TrackingService : Service(), LocationListener {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= 26) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Ride recording", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL, getString(R.string.rec_channel_name), NotificationManager.IMPORTANCE_LOW)
             )
         }
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        fun action(code: Int, act: String) = PendingIntent.getService(
+            this, code, Intent(this, TrackingService::class.java).setAction(act),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val paused = state.value.status == TrackStatus.PAUSED
         return NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle("Cycler is recording your ride")
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(getString(R.string.rec_title))
             .setContentText(text)
+            .addAction(
+                0,
+                getString(if (paused) R.string.rec_action_resume else R.string.rec_action_pause),
+                action(1, if (paused) ACTION_RESUME else ACTION_PAUSE),
+            )
+            .addAction(0, getString(R.string.rec_action_finish), action(2, ACTION_STOP))
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setOnlyAlertOnce(true)

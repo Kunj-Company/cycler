@@ -130,7 +130,7 @@ fun SegmentDetailScreen(vm: MainVm, id: String) {
     val segs = rememberSegments(vm)
     val metas by vm.store.metas.collectAsState()
     val sf = segs.firstOrNull { it.seg.id == id }
-    var confirmDelete by remember { mutableStateOf(false) }
+    var confirmDelete by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             TopBar(sf?.seg?.name ?: "Segment", { vm.segmentId = null }) {
@@ -204,13 +204,20 @@ fun SegmentDetailScreen(vm: MainVm, id: String) {
 @Composable
 fun SegmentCreateScreen(vm: MainVm, rideId: String) {
     val scope = rememberCoroutineScope()
-    val route by produceState<Route?>(null, rideId) { value = withContext(Dispatchers.IO) { vm.store.load(rideId) } }
-    var range by remember { mutableStateOf(0.25f..0.5f) }
-    var name by remember { mutableStateOf("") }
+    var routeLoaded by remember(rideId) { mutableStateOf(false) }
+    val route by produceState<Route?>(null, rideId) { value = withContext(Dispatchers.IO) { vm.store.load(rideId) }; routeLoaded = true }
+    var range by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = FloatRangeSaver) { mutableStateOf(0.25f..0.5f) }
+    var name by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
             TopBar("New segment", { vm.segmentFromRide = null })
             val r = route
+            if (routeLoaded && (r == null || r.pts.size < 2)) {
+                Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                    Text("This ride's track couldn't be read.", style = MaterialTheme.typography.bodyMedium, color = Cy.colors.danger)
+                    TextButton({ vm.segmentFromRide = null; vm.detailId = null; vm.store.delete(rideId) }) { Text("Delete", color = Cy.colors.danger) }
+                }
+            }
             if (r == null || r.pts.size < 2) return@Column
             val cum = remember(r) { Geo.cumulative(r.pts) }
             val total = cum.last()

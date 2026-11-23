@@ -1,0 +1,12 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- single-colour version of the launcher foreground for themed icons -->
+    <path android:pathData="M38,66m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4" />
+    <path android:pathData="M70,66m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4" />
+    <path android:pathData="M38,66 L48,46 L64,46 L70,66 M48,46 L56,66 L38,66 M62,40 L66,40"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

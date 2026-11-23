@@ -72,7 +72,7 @@ object Photon {
 
     fun search(query: String, near: Pt?): List<Place> {
         var url = "https://photon.komoot.io/api/?limit=6&q=" + URLEncoder.encode(query, "UTF-8")
-        if (near != null) url += String.format(Locale.US, "&lat=%.4f&lon=%.4f", near.lat, near.lon)
+        if (near != null) url += String.format(Locale.US, "&lat=%.2f&lon=%.2f", near.lat, near.lon)
         val feats = JSONObject(httpGet(url, 20000)).getJSONArray("features")
         val out = ArrayList<Place>()
         for (i in 0 until feats.length()) {

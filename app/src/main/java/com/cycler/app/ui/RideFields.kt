@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.TurnRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -177,6 +178,11 @@ fun BigNumbers(vm: MainVm, st: TrackState, now: Long, climbM: Double, climbNote:
 @Composable
 private fun BigField(key: String, st: TrackState, now: Long, climbM: Double, size: Int, modifier: Modifier) {
     val f = RideFields.of(key) ?: return
+    // The big numbers are already huge; cap the system font scale here so they cannot overflow at 200%.
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, d.fontScale.coerceAtMost(1.3f)),
+    ) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             RideFields.value(key, st, now, climbM), maxLines = 1,
@@ -187,6 +193,7 @@ private fun BigField(key: String, st: TrackState, now: Long, climbM: Double, siz
             style = if (size > 100) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
     }
 }
 
@@ -218,7 +225,7 @@ fun RideScreenEditor(vm: MainVm) {
                         if (pages.size > 1) {
                             Text(
                                 "Remove page", style = MaterialTheme.typography.labelMedium, color = Cy.colors.danger,
-                                modifier = Modifier.clickable { save(pages.filterIndexed { k, _ -> k != i }) }.padding(4.dp),
+                                modifier = Modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { save(pages.filterIndexed { k, _ -> k != i }) }.minimumInteractiveComponentSize().padding(4.dp),
                             )
                         }
                     }

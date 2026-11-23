@@ -27,9 +27,14 @@ object WidgetLaunch {
         val tabName = i.getStringExtra(WidgetIntents.EXTRA_TAB)
         val rideId = i.getStringExtra(WidgetIntents.EXTRA_RIDE_ID)
         if (action == null && tabName == null && rideId == null) return false
+        val token = i.getStringExtra(WidgetIntents.EXTRA_TOKEN)
+        val authentic = i.action == WidgetIntents.OPEN_ACTION && WidgetAuth.valid(ctx, token)
         i.removeExtra(WidgetIntents.EXTRA_WIDGET_ACTION)
         i.removeExtra(WidgetIntents.EXTRA_TAB)
         i.removeExtra(WidgetIntents.EXTRA_RIDE_ID)
+        i.removeExtra(WidgetIntents.EXTRA_TOKEN)
+        // Anything exported can be sent these extras; without the install's secret it is not a widget tap.
+        if (!authentic) return false
 
         // Close whatever full-screen page is open so the tab or ride is what the rider sees.
         vm.showSettings = false

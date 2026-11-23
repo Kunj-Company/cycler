@@ -35,7 +35,6 @@ import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
-import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,12 +59,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cycler.app.MainVm
 import com.cycler.app.net.BRouter
-import com.cycler.app.net.UpdateCheck
-import com.cycler.app.net.Updates
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 private const val HUB = "hub"
+private const val REPO_URL = "https://github.com/Kunj-Company/cycler"
+private const val PRIVACY_POLICY_URL = "https://github.com/Kunj-Company/cycler/blob/main/docs/PRIVACY.md"
 
 /** Where the back arrow on each page leads. */
 private fun parentOf(page: String) = when (page) {
@@ -83,7 +82,6 @@ private fun titleOf(page: String) = when (page) {
     "data" -> "Maps and data"
     "phone" -> "Phone"
     "about" -> "About"
-    "updates" -> "Updates"
     "privacy" -> "Privacy"
     "whatsnew" -> "What's new"
     "licence" -> "Licence"
@@ -117,17 +115,21 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
     val restore = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        if (uri != null) scope.launch {
-            var pendingCare: String? = null
-            var pendingPrefs: String? = null
-            val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openInputStream(uri)!!.use { vm.store.importAll(it) { name, text -> if (name == "care.json") pendingCare = text else if (name == "prefs.json") pendingPrefs = text } } }.getOrNull()
-            }
-            // The bike care list and settings in the backup replace the ones here.
-            pendingCare?.let { vm.saveCare(com.cycler.app.data.CareItem.parse(it)) }
-            pendingPrefs?.let { if (vm.prefs.importJson(it) > 0) vm.reloadSettings() }
-            toast(if (n != null && n > 0) "Restored $n files from the backup" else "That file isn't a Cycler backup")
-        }
+        if (uri != null) vm.restoreBackup(uri)
+    }
+    if (vm.restoring) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Restoring…") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp), color = Cy.colors.accent)
+                    Spacer(Modifier.width(14.dp))
+                    Text("Bringing back your rides and settings. This can take a moment.")
+                }
+            },
+            confirmButton = {},
+        )
     }
     val inspection = androidx.compose.ui.platform.LocalInspectionMode.current
     val healthAvailable = remember { !inspection && com.cycler.app.health.Health.available(ctx) }
@@ -198,7 +200,6 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                                 "App and phone",
                                 HubItem(Icons.Outlined.Map, "Maps and data", "Offline maps, backup and restore") { page = "data" },
                                 HubItem(Icons.Outlined.PhoneAndroid, "Phone", "Battery, location and notifications") { page = "phone" },
-                                HubItem(Icons.Outlined.SystemUpdate, "Updates", if (version.isEmpty()) "Check for a newer version" else "Version $version") { page = "updates" },
                                 HubItem(Icons.Outlined.Info, "About", if (version.isEmpty()) "Cycler" else "Cycler $version") { page = "about" },
                             )
                         }
@@ -351,7 +352,6 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                         }
 
                         "about" -> AboutPage(version) { page = it }
-                        "updates" -> UpdatesPage(version)
                         "privacy" -> PrivacyPage()
                         "whatsnew" -> WhatsNewPage()
                         "licence" -> LicencePage()
@@ -424,7 +424,7 @@ private fun ToggleRow(title: String, note: String, checked: Boolean, onChange: (
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        CySwitch(checked, onChange)
+        CySwitch(checked, null)
     }
     Hairline()
 }
@@ -503,7 +503,7 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     Text(
         "A cycling app for recording rides with GPS, planning routes and looking back on your rides. " +
             "Your rides stay on this phone, with no account and no analytics. Weather, route planning, " +
-            "search and the update check use online services (see Privacy).",
+            "search use online services (see Privacy).",
         style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp),
     )
     Text("Developed by Abhiram N J", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
@@ -517,8 +517,8 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     SimpleLinkRow("What's new") { open("whatsnew") }
     SimpleLinkRow("Licence") { open("licence") }
     SimpleLinkRow("Open-source notices") { open("notices") }
-    AboutLinkRow("Source code on GitHub", "github.com/Kunj-Company/cycler", Updates.REPO_URL)
-    AboutLinkRow("Releases", "github.com/Kunj-Company/cycler/releases", Updates.RELEASES_URL)
+    AboutLinkRow("Privacy policy", "Full text on GitHub", PRIVACY_POLICY_URL)
+    AboutLinkRow("Source code on GitHub", "github.com/Kunj-Company/cycler", REPO_URL)
     Spacer(Modifier.height(28.dp))
     SectionLabel("Credits")
     Spacer(Modifier.height(8.dp))
@@ -539,67 +539,19 @@ private fun openUrl(ctx: android.content.Context, url: String): Boolean = runCat
 }.isSuccess
 
 @Composable
-private fun UpdatesPage(version: String) {
-    val ctx = LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    var checking by remember { mutableStateOf(false) }
-    var result by remember { mutableStateOf<UpdateCheck?>(null) }
-    PageNote("You have Cycler ${version.ifEmpty { "(unknown version)" }}.")
-    CyButton(
-        if (checking) "Checking…" else "Check for updates",
-        {
-            checking = true
-            scope.launch {
-                result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Updates.check(version) }
-                checking = false
-            }
-        },
-        Modifier.fillMaxWidth().padding(vertical = 8.dp), Btn.SECONDARY, enabled = !checking,
-    )
-    Spacer(Modifier.height(12.dp))
-    when (val r = result) {
-        is UpdateCheck.UpToDate -> Text("You have the latest version (${r.version}).", style = MaterialTheme.typography.bodyLarge)
-        is UpdateCheck.Error -> Text(r.message, style = MaterialTheme.typography.bodyLarge)
-        is UpdateCheck.Available -> {
-            val rel = r.release
-            Text("Cycler ${rel.version} is available", style = MaterialTheme.typography.titleMedium)
-            Updates.displayDate(rel.publishedAt)?.let {
-                Text("Released $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Text(
-                "It installs over the current app and keeps your rides.",
-                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp),
-            )
-            CyButton(
-                "Download", { if (!openUrl(ctx, rel.apkUrl ?: rel.htmlUrl)) openUrl(ctx, rel.htmlUrl) },
-                Modifier.fillMaxWidth().padding(top = 16.dp),
-            )
-            CyButton(
-                "Release notes", { openUrl(ctx, rel.htmlUrl) },
-                Modifier.fillMaxWidth().padding(top = 8.dp), Btn.SECONDARY,
-            )
-        }
-        null -> {}
-    }
-    Spacer(Modifier.height(20.dp))
-    Text(
-        "Checks github.com. Nothing else is sent.",
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
-@Composable
 private fun PrivacyPage() {
     PageNote("What stays on this phone, and what goes online.")
     val sections = listOf(
-        "On this phone" to "Your rides, photos and settings are stored only on this phone. There is no account, no analytics and no ads. Backups are files you save yourself.",
+        "On this phone" to "Your rides, photos and settings are stored only on this phone. There is no account, no analytics, no ads and no tracking. Nothing leaves the phone except the requests listed below.",
+        "Backup" to "A backup is a zip file you save yourself. It holds your rides, routes, photos and settings. Photos keep their original metadata, including where they were taken. Android cloud backup is turned off.",
         "Health Connect" to "If you connect it, Cycler reads heart rate and weight, to show on ride pages and estimate energy. It never writes to Health Connect and never shares what it reads.",
-        "Weather" to "On the Ride screen, your position rounded to about 100 m is sent to Open-Meteo to get the weather.",
-        "Route planning" to "The points of a route you plan are sent to BRouter.",
-        "Place search" to "What you type in search is sent to Photon.",
-        "Traffic signals" to "When you open a ride or route, or follow one, its points are sent to the Overpass API to find traffic signals along it.",
+        "Weather" to "Whenever the app knows your position, that position rounded to about 100 m (3 decimals) is sent to Open-Meteo to get the weather, at most every 15 minutes.",
+        "Route planning" to "The points of a route or loop you plan are sent to BRouter. For a loop, your current position is the start, sent to 6 decimals (about 10 cm).",
+        "Place search" to "What you type in search is sent to Photon, with your position rounded to about 1 km (2 decimals) to put nearby places first.",
+        "Traffic signals" to "When you open a ride or route, or follow one, a box around it (its bounding box) is sent to the Overpass API to find traffic signals.",
         "Maps" to "Map tiles come from OpenFreeMap or CyclOSM, so they see the area you are looking at, including maps you save for offline use.",
-        "Updates" to "The update check contacts GitHub only when you tap Check for updates.",
+        "Privacy policy" to "The full policy is at $PRIVACY_POLICY_URL.",
+        "Contact" to "Kunj Company, hellokunjcompany@gmail.com",
     )
     sections.forEach { (title, body) ->
         Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {

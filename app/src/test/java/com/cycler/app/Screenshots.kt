@@ -175,8 +175,9 @@ class Screenshots {
     @Test fun ride_workout_and_laps() { workoutRide(); shell("03b_ride_workout_laps", Tab.RIDE) }
     @Test fun big_numbers() {
         workoutRide()
+        val state = TrackingService.state.value
         shot("03c_big_numbers", dark = true) {
-            com.cycler.app.ui.BigNumbers(vm, TrackingService.state.value, System.currentTimeMillis(), 184.0, null, vm.workout) {}
+            com.cycler.app.ui.BigNumbers(vm, state, System.currentTimeMillis(), 184.0, null, vm.workout) {}
         }
     }
     @Test fun ride_screen_editor() = shot("19_ride_screen_editor") { com.cycler.app.ui.RideScreenEditor(vm) }

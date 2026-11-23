@@ -22,35 +22,57 @@ private fun heartRateAt(pts: List<Pt>, hr: List<Pair<Long, Int>>): IntArray {
 
 /** Garmin's Training Center XML: widely accepted, human-readable. For recorded rides. */
 object Tcx {
+    /**
+     * An empty route gives a valid document with one lap and no trackpoints. A route whose points
+     * carry no timestamps (a planned route or an old import) gets made-up ones, counted from the
+     * route's creation time and spread over its duration, because TCX requires a time on every
+     * trackpoint; a 1970 date would confuse the services that read it.
+     */
     fun write(route: Route, hr: List<Pair<Long, Int>> = emptyList()): String {
         val pts = route.pts
         val m = route.meta
+        val timed = pts.isNotEmpty() && pts.first().t > 0
+        val startMs = if (timed) pts.first().t else m.createdAt.coerceAtLeast(0)
         val cum = Geo.cumulative(pts)
-        val beats = heartRateAt(pts, hr)
-        val start = Instant.ofEpochMilli(pts.first().t).toString()
+        val beats = heartRateAt(pts, if (timed) hr else emptyList())
+        val total = cum.lastOrNull() ?: 0.0
+        val spanMs = when {
+            timed -> pts.last().t - pts.first().t
+            m.durationS > 0 -> m.durationS * 1000
+            else -> (pts.size - 1).coerceAtLeast(0) * 1000L
+        }
+        fun timeOf(i: Int): Long = when {
+            timed -> pts[i].t
+            total > 0 -> startMs + (spanMs * (cum[i] / total)).toLong()
+            else -> startMs + i * 1000L
+        }
+        val start = Instant.ofEpochMilli(startMs).toString()
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         sb.append("<TrainingCenterDatabase xmlns=\"http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2\">\n")
         sb.append(" <Activities>\n  <Activity Sport=\"Biking\">\n   <Id>").append(start).append("</Id>\n")
         sb.append("   <Lap StartTime=\"").append(start).append("\">\n")
-        sb.append("    <TotalTimeSeconds>").append(if (m.durationS > 0) m.durationS else (pts.last().t - pts.first().t) / 1000).append("</TotalTimeSeconds>\n")
+        sb.append("    <TotalTimeSeconds>").append(if (m.durationS > 0) m.durationS else spanMs / 1000).append("</TotalTimeSeconds>\n")
         sb.append(String.format(Locale.US, "    <DistanceMeters>%.1f</DistanceMeters>\n", m.distanceM))
         if (m.maxSpeedMs > 0) sb.append(String.format(Locale.US, "    <MaximumSpeed>%.2f</MaximumSpeed>\n", m.maxSpeedMs))
         sb.append("    <Calories>0</Calories>\n")
         if (m.avgHr > 0) sb.append("    <AverageHeartRateBpm><Value>${m.avgHr}</Value></AverageHeartRateBpm>\n")
         if (m.maxHr > 0) sb.append("    <MaximumHeartRateBpm><Value>${m.maxHr}</Value></MaximumHeartRateBpm>\n")
-        sb.append("    <Intensity>Active</Intensity>\n    <TriggerMethod>Manual</TriggerMethod>\n    <Track>\n")
-        pts.forEachIndexed { i, p ->
-            sb.append("     <Trackpoint><Time>").append(Instant.ofEpochMilli(p.t).toString()).append("</Time>")
-            sb.append(String.format(Locale.US, "<Position><LatitudeDegrees>%.7f</LatitudeDegrees><LongitudeDegrees>%.7f</LongitudeDegrees></Position>", p.lat, p.lon))
-            if (!p.ele.isNaN()) sb.append(String.format(Locale.US, "<AltitudeMeters>%.1f</AltitudeMeters>", p.ele))
-            sb.append(String.format(Locale.US, "<DistanceMeters>%.1f</DistanceMeters>", cum[i]))
-            if (beats[i] > 0) sb.append("<HeartRateBpm><Value>${beats[i]}</Value></HeartRateBpm>")
-            sb.append("</Trackpoint>\n")
+        sb.append("    <Intensity>Active</Intensity>\n    <TriggerMethod>Manual</TriggerMethod>\n")
+        if (pts.isNotEmpty()) {
+            sb.append("    <Track>\n")
+            pts.forEachIndexed { i, p ->
+                sb.append("     <Trackpoint><Time>").append(Instant.ofEpochMilli(timeOf(i)).toString()).append("</Time>")
+                sb.append(String.format(Locale.US, "<Position><LatitudeDegrees>%.7f</LatitudeDegrees><LongitudeDegrees>%.7f</LongitudeDegrees></Position>", p.lat, p.lon))
+                if (!p.ele.isNaN()) sb.append(String.format(Locale.US, "<AltitudeMeters>%.1f</AltitudeMeters>", p.ele))
+                sb.append(String.format(Locale.US, "<DistanceMeters>%.1f</DistanceMeters>", cum[i]))
+                if (beats[i] > 0) sb.append("<HeartRateBpm><Value>${beats[i]}</Value></HeartRateBpm>")
+                sb.append("</Trackpoint>\n")
+            }
+            sb.append("    </Track>\n")
         }
-        sb.append("    </Track>\n   </Lap>\n")
-        val name = m.name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        sb.append("   <Notes>").append(name).append("</Notes>\n")
+        sb.append("   </Lap>\n")
+        sb.append("   <Notes>").append(xmlEscape(m.name)).append("</Notes>\n")
         sb.append("  </Activity>\n </Activities>\n</TrainingCenterDatabase>\n")
         return sb.toString()
     }

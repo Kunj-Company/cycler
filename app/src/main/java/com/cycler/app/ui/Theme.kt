@@ -38,12 +38,12 @@ class CyColors(
 )
 
 private val LightCy = CyColors(
-    accent = Color(0xFF2563EB), accentSoft = Color(0xFFEAF1FE), danger = Color(0xFFD4403A),
-    success = Color(0xFF2F7D4F), warn = Color(0xFFB7791F), subtle = Color(0xFFF6F6F4),
+    accent = Color(0xFF2563EB), accentSoft = Color(0xFFEAF1FE), danger = Color(0xFFB8302B),
+    success = Color(0xFF2F7D4F), warn = Color(0xFF8F5A0B), subtle = Color(0xFFF6F6F4),
     border = Color(0xFFE5E5E2), isDark = false,
 )
 private val DarkCy = CyColors(
-    accent = Color(0xFF6C9BF5), accentSoft = Color(0xFF1C2740), danger = Color(0xFFEF6B64),
+    accent = Color(0xFF6C9BF5), accentSoft = Color(0xFF1C2740), danger = Color(0xFFF47A73),
     success = Color(0xFF5FB583), warn = Color(0xFFE0B252), subtle = Color(0xFF222222),
     border = Color(0xFF2F2F2F), isDark = true,
 )

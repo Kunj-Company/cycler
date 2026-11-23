@@ -11,6 +11,10 @@ ships, the work below, each under its own licence.
 | AndroidX, Jetpack Compose, Material 3 | Apache 2.0 |
 | Health Connect client | Apache 2.0 |
 | Kotlin, kotlinx.coroutines | Apache 2.0 |
+| OkHttp, Okio (via MapLibre) | Apache 2.0 |
+| Gson (via MapLibre) | Apache 2.0 |
+| Timber (via MapLibre) | Apache 2.0 |
+| Guava (via Health Connect) | Apache 2.0 |
 
 Test only, not shipped in the app: JUnit 4 (EPL 1.0), Robolectric (MIT),
 Roborazzi (Apache 2.0).

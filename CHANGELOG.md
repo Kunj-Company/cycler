@@ -2,6 +2,16 @@
 
 All notable changes to Cycler. Versions are tagged in Git as `v0.1.N`.
 
+## Unreleased
+
+### Changed
+- Removed the in-app update check and the Updates page. Nothing opens an APK download.
+- Android cloud backup is off (`allowBackup="false"`); the in-app zip backup is the only backup.
+- The Privacy page, onboarding text and README now state exactly what each online request sends.
+- Place search sends your position rounded to about 1 km (2 decimals) instead of 4 decimals.
+- Added a standalone privacy policy in `docs/PRIVACY.md`, linked from About.
+- Neutral wording for file export in the README and onboarding.
+
 ## 0.1.11
 
 ### Fixed

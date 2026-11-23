@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <!-- Bicycle silhouette: two wheels, frame, seat and handlebar. -->
+    <path android:fillColor="#FFFFFF" android:pathData="M5,20.5c-2.2,0 -4,-1.8 -4,-4s1.8,-4 4,-4s4,1.8 4,4S7.2,20.5 5,20.5zM5,18.9c1.3,0 2.4,-1.1 2.4,-2.4s-1.1,-2.4 -2.4,-2.4s-2.4,1.1 -2.4,2.4S3.7,18.9 5,18.9zM19,20.5c-2.2,0 -4,-1.8 -4,-4s1.8,-4 4,-4s4,1.8 4,4S21.2,20.5 19,20.5zM19,18.9c1.3,0 2.4,-1.1 2.4,-2.4s-1.1,-2.4 -2.4,-2.4s-2.4,1.1 -2.4,2.4S17.7,18.9 19,18.9z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M15.2,5.5a1.7,1.7 0,1 0,0 -3.4a1.7,1.7 0,0 0,0 3.4zM11.6,8.2l2.1,2.1v4.7h-1.6v-3.9l-2.2,-1.9c-0.6,-0.5 -0.6,-1.4 -0.1,-1.9l2.4,-2.3c0.3,-0.3 0.7,-0.4 1.1,-0.4c0.6,0 1.2,0.3 1.5,0.8l1,1.6c0.6,1 1.7,1.7 3,1.7v1.6c-1.7,0 -3.2,-0.9 -4.1,-2.2l-0.5,-0.8l-1.6,1.6z" />
+</vector>

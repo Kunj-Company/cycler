@@ -34,7 +34,7 @@ class BackupPrefsTest {
     }
 
     private fun setAll() {
-        prefs.profile = "road"; prefs.mapStyle = "dark"; prefs.keepScreenOn = false; prefs.themeMode = "dark"
+        prefs.profile = "fastbike"; prefs.mapStyle = "dark"; prefs.keepScreenOn = false; prefs.themeMode = "dark"
         prefs.autoPause = false; prefs.autoPauseLevel = 2; prefs.offRouteAlert = false; prefs.voice = true
         prefs.voiceEveryKm = 5; prefs.turnCues = false; prefs.weeklyGoalKm = 120; prefs.advancedStats = true
         prefs.weightKg = 72; prefs.autoLapKm = 10; prefs.ridePages = "speed|avg"; prefs.customWorkout = "5,3,60,60,5"
@@ -48,7 +48,7 @@ class BackupPrefsTest {
         val fresh = Prefs(ctx)
         assertEquals("trekking", fresh.profile)
         assertEquals(17, fresh.importJson(json))
-        assertEquals("road", fresh.profile); assertEquals("dark", fresh.mapStyle); assertFalse(fresh.keepScreenOn)
+        assertEquals("fastbike", fresh.profile); assertEquals("dark", fresh.mapStyle); assertFalse(fresh.keepScreenOn)
         assertEquals("dark", fresh.themeMode); assertFalse(fresh.autoPause); assertEquals(2, fresh.autoPauseLevel)
         assertFalse(fresh.offRouteAlert); assertTrue(fresh.voice); assertEquals(5, fresh.voiceEveryKm)
         assertFalse(fresh.turnCues); assertEquals(120, fresh.weeklyGoalKm); assertTrue(fresh.advancedStats)

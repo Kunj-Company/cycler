@@ -330,7 +330,8 @@ class WidgetTest {
     // --- Starting from the widget, inside the activity ---
 
     private fun fromWidget(vararg extras: Pair<String, String>) =
-        Intent().also { i -> extras.forEach { (k, v) -> i.putExtra(k, v) } }
+        Intent(WidgetIntents.OPEN_ACTION).putExtra(WidgetIntents.EXTRA_TOKEN, com.cycler.app.widget.WidgetAuth.token(ctx))
+            .also { i -> extras.forEach { (k, v) -> i.putExtra(k, v) } }
 
     private fun startIntent() = fromWidget(
         WidgetIntents.EXTRA_TAB to Tab.RIDE.name, WidgetIntents.EXTRA_WIDGET_ACTION to WidgetIntents.WIDGET_ACTION_START,

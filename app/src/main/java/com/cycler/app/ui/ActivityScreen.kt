@@ -13,6 +13,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -185,6 +190,11 @@ fun ActivityScreen(vm: MainVm, initialPeriod: Period = Period.WEEK, now: Long = 
         ActivityChart(
             values = buckets.map { it.value(measure) }, selectable = buckets.map { it.start <= now },
             selected = sel?.let { selected }, average = avg,
+            descriptions = buckets.map { b ->
+                val (v, u) = valueText(measure, b.distanceM, b.durationS, b.ascentM)
+                Insights.bucketTitle(period, b) + ": " + v + (if (u != null) " $u" else "") +
+                    if (b.start > now) " (not yet)" else if (b.rides > 0) ", ${b.rides} ride${if (b.rides > 1) "s" else ""}" else ", no rides"
+            },
             onSelect = { i -> selected = if (i == selected) -1 else i },
         )
         Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
@@ -282,7 +292,9 @@ fun ActivityScreen(vm: MainVm, initialPeriod: Period = Period.WEEK, now: Long = 
 
         Spacer(Modifier.height(22.dp))
         val segTick by vm.store.segTick.collectAsState()
-        val segCount = remember(segTick) { vm.store.segments().size }
+        val segCount by androidx.compose.runtime.produceState(0, segTick) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.store.segments().size }
+        }
         val due = remember(vm.care, rides, now) { Care.dueCount(vm.care, rides, now) }
         Hairline()
         LinkRow("Segments", if (segCount == 0) "None yet" else "$segCount saved") { vm.showSegments = true }
@@ -307,7 +319,7 @@ fun ActivityScreen(vm: MainVm, initialPeriod: Period = Period.WEEK, now: Long = 
 @Composable
 private fun ActivityChart(
     values: List<Double>, selectable: List<Boolean>, selected: Int?, average: Double, onSelect: (Int) -> Unit,
-    modifier: Modifier = Modifier,
+    modifier: Modifier = Modifier, descriptions: List<String> = emptyList(),
 ) {
     val ink = MaterialTheme.colorScheme.onSurface
     val accent = Cy.colors.accent
@@ -316,6 +328,16 @@ private fun ActivityChart(
     val n = values.size
     Canvas(
         modifier.fillMaxWidth().height(136.dp)
+            .semantics {
+                contentDescription = "Bar chart, $n bars. " + descriptions.joinToString(". ")
+                if (selected != null) stateDescription = descriptions.getOrElse(selected) { "" }
+                val prev = (selected?.minus(1) ?: n - 1).coerceAtLeast(0)
+                val next = (selected?.plus(1) ?: 0).coerceAtMost(n - 1)
+                customActions = listOf(
+                    CustomAccessibilityAction("Previous bar") { if (n > 0 && selectable.getOrElse(prev) { false }) { onSelect(prev); true } else false },
+                    CustomAccessibilityAction("Next bar") { if (n > 0 && selectable.getOrElse(next) { false }) { onSelect(next); true } else false },
+                )
+            }
             .pointerInput(n, selectable) {
                 detectTapGestures { p ->
                     val i = (p.x / size.width * n).toInt().coerceIn(0, n - 1)
@@ -411,14 +433,17 @@ fun HeatmapScreen(vm: MainVm) {
     val rides = remember(metas) { metas.filter { it.type == RouteType.RECORDED } }
     val lines by androidx.compose.runtime.produceState(emptyList<MapLine>(), rides) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            // At most 200 points per ride and about 120k overall, so the map data stays small.
+            val per = if (rides.size * 200 > 120_000) maxOf(2, 120_000 / rides.size) else 200
             rides.mapNotNull { m ->
                 vm.store.load(m.id)?.pts?.let { pts ->
-                    val step = pts.size / 400 + 1
+                    val step = pts.size / per + 1
                     MapLine(pts.filterIndexed { i, _ -> i % step == 0 || i == pts.size - 1 }, COLOR_TRACK, 4f, 0.45f)
                 }
             }
         }
     }
+    val mapReady = lines.isNotEmpty() || rides.isEmpty()
     val camera = remember(lines) { if (lines.isEmpty()) null else CameraCmd(lines.flatMap { l -> listOf(l.pts.first(), l.pts[l.pts.size / 2], l.pts.last()) } + lines.flatMap { it.pts.filterIndexed { i, _ -> i % 25 == 0 } }) }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -434,6 +459,12 @@ fun HeatmapScreen(vm: MainVm) {
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 CyclerMap(Modifier.fillMaxSize(), vm.mapStyle, lines, emptyList(), camera, initial = vm.prefs.lastLoc)
+                if (!mapReady) {
+                    Row(Modifier.align(Alignment.TopCenter).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Text("  Loading your rides…", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 LayerButton(vm.mapStyle, Modifier.align(Alignment.BottomEnd).padding(12.dp)) { vm.mapStyle = it; vm.prefs.mapStyle = it }
             }
         }

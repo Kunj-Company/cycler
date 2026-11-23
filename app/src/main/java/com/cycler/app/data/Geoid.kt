@@ -25,7 +25,4 @@ class Geoid(private val ctx: Context) {
         if (l.hasMslAltitude()) -l.mslAltitudeMeters else null
     }.getOrNull()
 
-    companion object {
-        val available: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
-    }
 }

@@ -1,5 +1,6 @@
 package com.cycler.app.ui
 
+import androidx.compose.foundation.selection.selectable
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -246,8 +247,10 @@ private fun LocationStep(granted: Boolean) {
     StepHeader(
         Icons.Outlined.LocationOn, "Turn on location",
         "Cycler needs your location to show where you are on the map and to record your rides. " +
-            "Your rides stay on this phone. For the weather, a rounded position (about 100 m) is sent to Open-Meteo, " +
-            "and route planning uses online map services.",
+            "Your rides stay on this phone, with no account, no analytics and no ads. Online requests: " +
+            "weather sends your position rounded to about 100 m, place search sends what you type and a rounded position, " +
+            "route planning sends the points you plan between (a loop starts at your position), and map tiles show " +
+            "the map provider the area you view. See Privacy in Settings, About.",
     )
     Spacer(Modifier.height(20.dp))
     Text(
@@ -276,7 +279,7 @@ private fun BackgroundStep() {
     )
     Spacer(Modifier.height(20.dp))
     Text(
-        "On Samsung phones, if rides stop when the screen is off, open the app settings and set " +
+        "On some phones, if rides stop when the screen is off, open the app settings and set " +
             "Battery to Unrestricted.",
         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -298,7 +301,7 @@ private fun RidingStep(vm: MainVm) {
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 52.dp)
                     .background(if (sel) Cy.colors.accentSoft else androidx.compose.ui.graphics.Color.Transparent)
-                    .clickable(role = Role.RadioButton) {
+                    .selectable(selected = sel, role = Role.RadioButton) {
                         vm.profile = key
                         vm.prefs.profile = key
                     }

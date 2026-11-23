@@ -1,5 +1,6 @@
 package com.cycler.app
 
+import androidx.compose.foundation.selection.selectable
 import android.Manifest
 import android.app.Application
 import android.content.Context
@@ -80,6 +81,7 @@ import com.cycler.app.ui.CyclerTheme
 import com.cycler.app.ui.Hairline
 import com.cycler.app.ui.HeatmapScreen
 import com.cycler.app.ui.Onboarding
+import com.cycler.app.ui.reloadSettings
 import com.cycler.app.ui.ShareScreen
 import com.cycler.app.ui.OfflineScreen
 import com.cycler.app.ui.PlanScreen
@@ -96,6 +98,7 @@ import com.cycler.app.widget.WidgetLaunch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -244,10 +247,118 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     var selected by mutableIntStateOf(0)
     var busy by mutableStateOf(false)
     var error by mutableStateOf<String?>(null)
+    /** Re-runs the last planning / suggestion request, for the Retry buttons. */
+    var retryPlan: (() -> Unit)? = null
+    var retrySuggest: (() -> Unit)? = null
+    /** Traffic signals already looked up, per ride id, so reopening a ride does not query again. */
+    val signalsCache = com.cycler.app.ui.SignalsCache()
 
     init {
+        // The UI was recreated while a ride is recording: pick the followed route and workout back up from the service.
+        if (TrackingService.state.value.status != TrackStatus.IDLE) {
+            restoreFromService()?.let { (g, w) ->
+                guide = g
+                workout = w
+                guideSignals = TrackingService.signals
+            }
+        }
         viewModelScope.launch(Dispatchers.IO) {
-            if (TrackingService.state.value.status == TrackStatus.IDLE) store.recoverUnfinished()
+            // Never while a ride is being recorded (the file is the live ride), and never allowed to crash the app.
+            if (TrackingService.state.value.status != TrackStatus.IDLE) return@launch
+            val ctx = getApplication<Application>()
+            runCatching {
+                when (val r = store.recoverUnfinishedResult()) {
+                    is RouteStore.Recovery.Saved -> {
+                        val at = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(r.interruptedAt))
+                        val name = store.metas.value.firstOrNull { it.id == r.id }?.name ?: ""
+                        // The ride page opens with the message, so the rider can check, rename or delete it.
+                        TrackingService.state.update {
+                            if (it.status != TrackStatus.IDLE) it
+                            else it.copy(notice = ctx.getString(R.string.rec_interrupted, at, name), savedId = r.id)
+                        }
+                    }
+                    RouteStore.Recovery.Failed ->
+                        TrackingService.state.update { if (it.status != TrackStatus.IDLE) it else it.copy(notice = ctx.getString(R.string.rec_recover_failed)) }
+                    RouteStore.Recovery.None -> {}
+                }
+            }
+        }
+    }
+
+    private fun restoreFromService(): Pair<Route?, Workout?>? {
+        val pts = TrackingService.guide
+        val w = TrackingService.workout
+        if (pts.isNullOrEmpty() && w == null) return null
+        return rebuildGuide(pts) to w
+    }
+
+    /** The flyover video export. Runs here so a rotation keeps it going; the share screen re-attaches to [video]. */
+    val video = kotlinx.coroutines.flow.MutableStateFlow<com.cycler.app.ui.VideoState>(com.cycler.app.ui.VideoState.Idle)
+    private var videoJob: kotlinx.coroutines.Job? = null
+    @Volatile private var videoCancel = false
+    @Volatile private var videoSilent = false
+
+    fun startVideo(meta: RouteMeta, pts: List<Pt>, ground: com.cycler.app.share.Ground?, dark: Boolean, out: java.io.File, caption: String) {
+        if (videoJob?.isActive == true) return
+        videoCancel = false
+        videoSilent = false
+        video.value = com.cycler.app.ui.VideoState.Running(0f)
+        val app = getApplication<Application>()
+        videoJob = viewModelScope.launch {
+            val ok = withContext(Dispatchers.Default) {
+                runCatching {
+                    com.cycler.app.share.VideoExport.export(
+                        com.cycler.app.share.FlyoverScene(app, meta, pts, ground, dark), out,
+                        { video.value = com.cycler.app.ui.VideoState.Running(it) }, { videoCancel },
+                    )
+                }.getOrDefault(false)
+            }
+            video.value = when {
+                ok && !videoCancel -> com.cycler.app.ui.VideoState.Done(out, caption)
+                videoCancel && videoSilent -> com.cycler.app.ui.VideoState.Idle
+                videoCancel -> com.cycler.app.ui.VideoState.Cancelled
+                else -> com.cycler.app.ui.VideoState.Failed
+            }
+        }
+    }
+
+    /** Stop the export; [silent] when the rider has left the share screen, so no message is shown later. */
+    fun cancelVideo(silent: Boolean = false) {
+        if (videoJob?.isActive != true) return
+        videoSilent = silent
+        videoCancel = true
+    }
+
+    /** True while a backup is being restored; the Settings screen shows a blocking "Restoring…" dialog. */
+    var restoring by mutableStateOf(false)
+        private set
+
+    /** Restore a backup in the view model's scope, so leaving Settings does not skip the settings and care parts. */
+    fun restoreBackup(uri: Uri) {
+        if (restoring) return
+        restoring = true
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            var pendingCare: String? = null
+            var pendingPrefs: String? = null
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    app.contentResolver.openInputStream(uri)!!.use {
+                        store.importAll(it) { name, text -> if (name == "care.json") pendingCare = text else if (name == "prefs.json") pendingPrefs = text }
+                    }
+                }
+            }
+            val n = result.getOrNull()
+            val bad = result.exceptionOrNull()
+            pendingCare?.let { saveCare(CareItem.parse(it)) }
+            pendingPrefs?.let { if (prefs.importJson(it) > 0) reloadSettings() }
+            restoring = false
+            val msg = when {
+                n != null && n > 0 -> "Restored $n files from the backup"
+                bad is java.util.zip.ZipException || (bad == null && n == 0) -> "That file isn't a Cycler backup"
+                else -> "Couldn't read the backup file. Check it and try again."
+            }
+            Toast.makeText(app, msg, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -264,6 +375,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** Up to three alternative routes through the chosen points. */
     fun findRoutes(points: List<Pt>) {
         if (points.size < 2 || busy) return
+        retryPlan = { findRoutes(points) }
         busy = true
         error = null
         viewModelScope.launch {
@@ -273,7 +385,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             val ok = results.mapNotNull { it.getOrNull() }
                 .distinctBy { "${it.distanceM.toInt() / 50}-${it.ascentM.toInt() / 5}" }
             if (ok.isEmpty()) {
-                error = results.firstNotNullOfOrNull { it.exceptionOrNull() }?.message ?: "No route found"
+                error = com.cycler.app.ui.RouteErrors.message(results.firstNotNullOfOrNull { it.exceptionOrNull() })
                 options = emptyList()
             } else {
                 options = tag(ok.mapIndexed { i, r ->
@@ -288,6 +400,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** Round trips of about [loopKm] heading out in four directions from [start]. */
     fun findLoops(start: Pt) {
         if (busy) return
+        retryPlan = { findLoops(start) }
         busy = true
         error = null
         val target = loopKm * 1000.0
@@ -301,7 +414,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             }
             val ok = results.mapNotNull { it.getOrNull() }
             if (ok.isEmpty()) {
-                error = results.firstNotNullOfOrNull { it.exceptionOrNull() }?.message ?: "No loops found here"
+                error = com.cycler.app.ui.RouteErrors.message(results.firstNotNullOfOrNull { it.exceptionOrNull() })
                 options = emptyList()
             } else {
                 options = tag(ok.map { (name, r) ->
@@ -316,6 +429,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** A mix of short, medium and long loops from [from], in varied directions. */
     fun suggestNearby(from: Pt) {
         if (suggestBusy) return
+        retrySuggest = { suggestNearby(from) }
         suggestBusy = true
         suggestError = null
         val prof = profile
@@ -337,7 +451,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             val ok = results.mapNotNull { it.getOrNull() }.sortedBy { it.distanceM }
             suggestions = ok
             if (ok.isEmpty()) {
-                suggestError = results.firstNotNullOfOrNull { it.exceptionOrNull() }?.message ?: "No routes found here"
+                suggestError = com.cycler.app.ui.RouteErrors.message(results.firstNotNullOfOrNull { it.exceptionOrNull() })
             }
             suggestBusy = false
         }
@@ -415,6 +529,15 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     }
 }
 
+/** A followed route rebuilt from the points the recorder holds (name and totals are not kept there). */
+fun rebuildGuide(pts: List<Pt>?): Route? {
+    if (pts.isNullOrEmpty()) return null
+    var d = 0.0
+    for (i in 1 until pts.size) d += Geo.dist(pts[i - 1], pts[i])
+    val meta = RouteMeta("", "Route", RouteType.PLANNED, System.currentTimeMillis(), d, 0.0, 0L, pts.first().lat, pts.first().lon)
+    return Route(meta, pts)
+}
+
 fun hasLocationPermission(ctx: Context) =
     ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
@@ -476,7 +599,8 @@ fun BottomBar(tab: Tab, onSelect: (Tab) -> Unit) {
                     val sel = t == tab
                     val color = if (sel) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                     Column(
-                        Modifier.weight(1f).fillMaxSize().clickable(
+                        Modifier.weight(1f).fillMaxSize().selectable(
+                            selected = sel, role = androidx.compose.ui.semantics.Role.Tab,
                             interactionSource = remember { MutableInteractionSource() }, indication = null,
                         ) { onSelect(t) },
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -499,6 +623,16 @@ fun BottomBar(tab: Tab, onSelect: (Tab) -> Unit) {
 fun App(vm: MainVm) {
     val ctx = LocalContext.current
     var granted by remember { mutableStateOf(hasLocationPermission(ctx)) }
+    // Listen for position only while the app is on screen (the recorder has its own listener).
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var started by remember { mutableStateOf(owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) }
+    DisposableEffect(owner) {
+        val o = androidx.lifecycle.LifecycleEventObserver { _, _ ->
+            started = owner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+        }
+        owner.lifecycle.addObserver(o)
+        onDispose { owner.lifecycle.removeObserver(o) }
+    }
     var askedOnce by remember { mutableStateOf(false) }
     val askPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         granted = hasLocationPermission(ctx)
@@ -508,7 +642,7 @@ fun App(vm: MainVm) {
         if (askedOnce && !hasLocationPermission(ctx)) {
             // Android stops showing the dialog after a refusal (or an "Approximate" answer),
             // so send the rider to the app's settings page to switch on precise location.
-            Toast.makeText(ctx, "Set Location to Allow, with Precise on", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, "Open Settings and set Location to Allow with Precise on", Toast.LENGTH_LONG).show()
             runCatching {
                 ctx.startActivity(
                     Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName))
@@ -533,11 +667,20 @@ fun App(vm: MainVm) {
     }
     LaunchedEffect(Unit) { if (vm.onboarded && !granted) request() }
 
-    val myLoc by produceState<Pt?>(initialValue = null, granted) {
-        if (granted) locationFlow(ctx).collect {
-            value = it
-            vm.prefs.lastLoc = it
-            vm.refreshWeather(it)
+    val myLoc by produceState<Pt?>(initialValue = null, granted, started) {
+        if (granted && started) {
+            var savedAt = 0L
+            var saved: Pt? = null
+            locationFlow(ctx).collect {
+                value = it
+                val now = System.currentTimeMillis()
+                if (com.cycler.app.ui.shouldPersistLoc(saved, savedAt, it, now)) {
+                    vm.prefs.lastLoc = it
+                    saved = it
+                    savedAt = now
+                }
+                vm.refreshWeather(it)
+            }
         }
     }
 

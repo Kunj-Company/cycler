@@ -91,11 +91,10 @@ or a card in 13 styles.
 - **Bike care**: jobs with kilometre or day intervals, notes and history. Mark one done
   today, on an earlier date or after a past ride.
 - **Widgets**: Ride, This week, Last ride and Riding stats.
-- **Export**: FIT, TCX and GPX files, or send a FIT file to Strava through the share sheet.
-- **Health Connect**: heart rate and weight from Samsung Health or other apps. Read only.
+- **Export**: FIT, TCX and GPX files, to share with apps that import them.
+- **Health Connect**: heart rate and weight that other apps put in Health Connect. Read only.
 - **Offline maps**: save the map around you for rides without signal.
 - **Backup and restore**: rides, routes, photos, segments, bike care and settings in one zip.
-- **Updates**: Settings → Updates checks GitHub for a newer version.
 - **First launch**: a short setup for location, background recording, bike type and goal.
 
 </details>
@@ -105,7 +104,7 @@ or a card in 13 styles.
 1. Download `Cycler-<version>.apk` from [Releases](https://github.com/Kunj-Company/cycler/releases)
    on an Android 8.0+ phone and open it. Allow installing from your browser or files app
    when asked.
-2. Later versions install over it and keep your rides. Open **Settings → Updates** to check.
+2. Cycler does not check for updates. Download a newer release from the same page and install it over the old one; your rides are kept.
 
 Release builds are signed with Cycler's release key. Certificate SHA-256:
 
@@ -115,20 +114,22 @@ Keep a backup now and then: **Settings → Maps and data → Back up everything*
 
 ## Privacy
 
-Rides, photos and settings stay in the app's own storage on your phone and are never
-uploaded. There is no account, no analytics and no ads. Only these requests leave the phone:
+Rides, photos and settings stay in the app's own storage on your phone. There is no
+account, no analytics, no ads and no tracking. Only these requests leave the phone:
 
-| What | Sent to | When |
-|---|---|---|
-| Map tiles | OpenFreeMap, CyclOSM | Whenever a map is shown or saved for offline use; they see the area |
-| Weather | Open-Meteo | On the Ride screen; your position rounded to about 100 m |
-| Route planning | BRouter (brouter.de) | When you plan; the points you route between |
-| Place search | Photon (photon.komoot.io) | When you search; the text you type |
-| Traffic signals | Overpass API | When you open or follow a ride or route; its points |
-| Update check | GitHub (api.github.com) | Only when you tap **Check for updates** |
+| What | Sent to | When | What is sent |
+|---|---|---|---|
+| Map tiles | OpenFreeMap, CyclOSM | Whenever a map is shown or saved for offline use | The tiles you view, so the provider sees the area |
+| Weather | Open-Meteo | Whenever the app has a position, at most every 15 minutes | Position rounded to about 100 m (3 decimals) |
+| Route planning | BRouter (brouter.de) | When you plan a route or loop, or ask for suggestions | The waypoints (6 decimals); for a loop, your current position is the start |
+| Place search | Photon (photon.komoot.io) | When you search | The text you type, and your position rounded to about 1 km (2 decimals) |
+| Traffic signals | Overpass API | When you open or follow a ride or route | A bounding box around the route |
 
 These are free community servers with no API keys. Maps, planning and weather need
-internet; recording does not. The same list is in the app under **About → Privacy**.
+internet; recording does not. A backup is a zip file you save yourself. Photos in it keep
+their original metadata, including where they were taken. Android cloud backup is off.
+The same list is in the app under **About → Privacy**; the full policy is in
+[docs/PRIVACY.md](https://github.com/Kunj-Company/cycler/blob/main/docs/PRIVACY.md).
 
 ## Build from source
 
@@ -206,7 +207,7 @@ upload key.
 | `data/` | Models, geometry, JSON file storage, GPX, heights above sea level |
 | `data/Export.kt` | FIT and TCX writers |
 | `health/Health.kt` | Health Connect reads |
-| `net/` | BRouter, Photon, weather, traffic signals and the update check |
+| `net/` | BRouter, Photon, weather and traffic signals |
 | `share/` | Share cards, the flyover renderer and the MP4 encoder |
 | `track/TrackingService.kt` | Foreground GPS recording, auto-pause, off-route alerts |
 | `ui/` | Theme, components, screens and the map wrapper |

@@ -1,5 +1,7 @@
 package com.cycler.app.ui
 
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -96,7 +98,7 @@ fun MediaStrip(vm: MainVm, id: String, tile: Int = 68) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val tick by vm.store.mediaTick.collectAsState()
-    val media = remember(id, tick) { vm.store.media(id) }
+    val media by produceState(emptyList<File>(), id, tick) { value = withContext(Dispatchers.IO) { vm.store.media(id) } }
     val thumbs by produceState(emptyList<Pair<File, Bitmap>>(), media) {
         value = withContext(Dispatchers.IO) { media.mapNotNull { f -> loadShareImage(f, 240)?.let { f to it } } }
     }
@@ -146,6 +148,7 @@ fun MediaStrip(vm: MainVm, id: String, tile: Int = 68) {
 @Composable
 fun RidesScreen(vm: MainVm) {
     val metas by vm.store.metas.collectAsState()
+    val loaded by vm.store.isLoaded.collectAsState()
     val rides = remember(metas) { metas.filter { it.type == RouteType.RECORDED } }
     val f = vm.rideFilter
     var searchOpen by remember { mutableStateOf(f.query.isNotEmpty()) }
@@ -249,7 +252,15 @@ fun RidesScreen(vm: MainVm) {
                 }
                 }
             }
-            if (shown.isEmpty()) {
+            if (!loaded) {
+                item(key = "loading") {
+                    Text(
+                        "Loading rides…", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 36.dp),
+                    )
+                }
+            } else if (shown.isEmpty()) {
                 item(key = "none") {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 36.dp)) {
                         Text("No rides match", style = MaterialTheme.typography.titleMedium)
@@ -290,7 +301,7 @@ private fun MenuLabel(text: String, active: Boolean, onClick: () -> Unit) {
 private fun RideCard(vm: MainVm, m: RouteMeta) {
     val tick by vm.store.mediaTick.collectAsState()
     val photos by produceState(emptyList<Bitmap>(), m.id, tick) {
-        value = withContext(Dispatchers.IO) { vm.store.media(m.id).take(4).mapNotNull { loadShareImage(it, 360) } }
+        value = withContext(Dispatchers.IO) { vm.store.media(m.id).take(4).mapNotNull { com.cycler.app.share.ThumbCache.load(it, 360) } }
     }
     Column(Modifier.fillMaxWidth().clickable { vm.detailId = m.id }.padding(vertical = 18.dp)) {
         Column(Modifier.padding(horizontal = 20.dp)) {
@@ -364,11 +375,11 @@ fun EditRideScreen(vm: MainVm, id: String) {
         return
     }
     val isNew = vm.editIsNew
-    var name by remember(id) { mutableStateOf(meta.name) }
-    var notes by remember(id) { mutableStateOf(meta.notes) }
-    var feeling by remember(id) { mutableIntStateOf(meta.feeling) }
-    var tags by remember(id) { mutableStateOf(meta.tags) }
-    var newTag by remember { mutableStateOf("") }
+    var name by androidx.compose.runtime.saveable.rememberSaveable(id) { mutableStateOf(meta.name) }
+    var notes by androidx.compose.runtime.saveable.rememberSaveable(id) { mutableStateOf(meta.notes) }
+    var feeling by androidx.compose.runtime.saveable.rememberSaveable(id) { mutableStateOf(meta.feeling) }
+    var tags by androidx.compose.runtime.saveable.rememberSaveable(id, stateSaver = TagListSaver) { mutableStateOf(meta.tags) }
+    var newTag by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
 
     fun close(save: Boolean) {
         if (save) vm.store.updateDetails(id, name, notes, feeling, tags)
@@ -428,7 +439,7 @@ fun EditRideScreen(vm: MainVm, id: String) {
                             Modifier.weight(1f).clip(Radius)
                                 .background(if (sel) Cy.colors.accentSoft else Color.Transparent)
                                 .border(if (sel) 1.5.dp else 1.dp, if (sel) Cy.colors.accent else Cy.colors.border, Radius)
-                                .clickable { feeling = if (sel) 0 else i + 1 }.padding(vertical = 10.dp),
+                                .selectable(selected = sel, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = { feeling = if (sel) 0 else i + 1 }).padding(vertical = 10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(emoji, style = MaterialTheme.typography.headlineSmall)
@@ -465,7 +476,7 @@ fun EditRideScreen(vm: MainVm, id: String) {
                             modifier = Modifier.clip(RoundedCornerShape(50))
                                 .background(if (sel) MaterialTheme.colorScheme.primary else Color.Transparent)
                                 .border(1.dp, if (sel) MaterialTheme.colorScheme.primary else Cy.colors.border, RoundedCornerShape(50))
-                                .clickable { tags = if (sel) tags - t else tags + t }
+                                .toggleable(value = sel, role = androidx.compose.ui.semantics.Role.Checkbox, onValueChange = { tags = if (sel) tags - t else tags + t })
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                         )
                     }

@@ -19,7 +19,9 @@ object WidgetIntents {
     const val EXTRA_TAB = "com.cycler.app.extra.TAB"
     const val EXTRA_RIDE_ID = "com.cycler.app.extra.RIDE_ID"
 
-    private const val OPEN_ACTION = "com.cycler.app.widget.OPEN"
+    const val EXTRA_TOKEN = "com.cycler.app.extra.WIDGET_TOKEN"
+
+    const val OPEN_ACTION = "com.cycler.app.widget.OPEN"
     private const val FLAGS = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
 
     // One code per widget and target.
@@ -36,6 +38,7 @@ object WidgetIntents {
 
     private fun activityIntent(ctx: Context) =
         Intent(ctx, MainActivity::class.java).setAction(OPEN_ACTION).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_TOKEN, WidgetAuth.token(ctx))
 
     fun openTab(ctx: Context, tab: Tab, requestCode: Int): PendingIntent =
         PendingIntent.getActivity(ctx, requestCode, activityIntent(ctx).putExtra(EXTRA_TAB, tab.name), FLAGS)

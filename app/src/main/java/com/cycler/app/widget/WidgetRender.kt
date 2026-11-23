@@ -21,7 +21,7 @@ object WidgetRender {
     private const val ACCENT = 0xFF4A7DF0.toInt()
     private const val ACCENT_SOFT = 0x884A7DF0.toInt()
     private const val EMPTY_DAY = 0x449A9A95
-    private const val LABEL = 0xFF85857F.toInt()
+    private const val LABEL = 0xFF6B6B66.toInt()
 
     /** The route's outline, like the thumbnail in the app. Null when there is no outline to draw. */
     fun routeBitmap(pts: List<Pt>, size: Int = 240): Bitmap? {
@@ -55,12 +55,12 @@ object WidgetRender {
     }
 
     /** One bar per day (distance in metres, oldest first) with a one-letter weekday under each. Today is the last bar. */
-    fun weekBars(valuesM: List<Double>, labels: List<String>, width: Int = 400, height: Int = 240): Bitmap {
+    fun weekBars(valuesM: List<Double>, labels: List<String>, width: Int = 400, height: Int = 240, label: Int = LABEL): Bitmap {
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val n = max(valuesM.size, 1)
         val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = LABEL; textAlign = Paint.Align.CENTER; textSize = height * 0.115f
+            color = label; textAlign = Paint.Align.CENTER; textSize = height * 0.115f
         }
         val labelH = textPaint.textSize * 1.5f
         val valueH = textPaint.textSize * 1.4f

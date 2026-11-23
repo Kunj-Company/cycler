@@ -14,6 +14,11 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -125,7 +130,7 @@ fun CyButton(
     }
     val alpha = if (enabled) 1f else 0.38f
     Row(
-        modifier.height(height).clip(Radius)
+        modifier.heightIn(min = height).clip(Radius)
             .background(bg.copy(alpha = bg.alpha * alpha))
             .then(if (kind == Btn.SECONDARY) Modifier.border(1.dp, scheme.outline.copy(alpha = alpha), Radius) else Modifier)
             .clickable(enabled = enabled, onClick = onClick)
@@ -151,10 +156,10 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
         options.forEachIndexed { i, label ->
             val sel = i == selected
             Box(
-                Modifier.weight(1f).height(34.dp).clip(RoundedCornerShape(8.dp))
+                Modifier.weight(1f).heightIn(min = 34.dp).clip(RoundedCornerShape(8.dp))
                     .background(if (sel) MaterialTheme.colorScheme.surface else Color.Transparent)
                     .then(if (sel) Modifier.border(1.dp, Cy.colors.border, RoundedCornerShape(8.dp)) else Modifier)
-                    .clickable { onSelect(i) },
+                    .selectable(selected = sel, role = Role.RadioButton, onClick = { onSelect(i) }),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -177,11 +182,17 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 @Composable
 fun Hairline(modifier: Modifier = Modifier) = HorizontalDivider(modifier, 1.dp, Cy.colors.border)
 
+/** Text colour for a tinted tag: darkened in the light theme so it keeps 4.5:1 on its own 12% tint. */
+internal fun tagInk(color: Color, dark: Boolean): Color =
+    if (dark) color else androidx.compose.ui.graphics.lerp(color, Color.Black, 0.25f)
+
 /** A small rounded tag. */
 @Composable
 fun Tag(text: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant, filled: Boolean = false) {
+    // Tinted tags in the light theme: darken the text so it keeps 4.5:1 on its own 12% tint.
+    val ink = if (filled) tagInk(color, Cy.colors.isDark) else color
     Text(
-        text, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1,
+        text, style = MaterialTheme.typography.labelMedium, color = ink, maxLines = 1,
         modifier = Modifier.clip(RoundedCornerShape(6.dp))
             .background(if (filled) color.copy(alpha = 0.12f) else Cy.colors.subtle)
             .padding(horizontal = 7.dp, vertical = 3.dp),
@@ -278,7 +289,7 @@ fun NameDialog(title: String, initial: String, confirm: String, onConfirm: (Stri
 /** A small line drawing of a route's shape. */
 @Composable
 fun RouteThumb(pts: List<Pt>, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onSurface) {
-    Box(modifier.clip(Radius).background(Cy.colors.subtle)) {
+    Box(modifier.clip(Radius).background(Cy.colors.subtle).semantics { contentDescription = "Route outline" }) {
         if (pts.size >= 2) {
             Canvas(Modifier.matchParentSize().padding(8.dp)) {
                 val minLat = pts.minOf { it.lat }
@@ -332,7 +343,11 @@ fun ElevationChart(pts: List<Pt>, modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Canvas(Modifier.fillMaxWidth().height(72.dp).padding(top = 6.dp)) {
+        Canvas(
+            Modifier.fillMaxWidth().height(72.dp).padding(top = 6.dp).semantics {
+                contentDescription = "Elevation profile, ${minE.toInt()} to ${maxE.toInt()} metres over ${Fmt.km(total)}"
+            },
+        ) {
             val span = (maxE - minE).coerceAtLeast(10.0)
             fun x(d: Double) = (d / total * size.width).toFloat()
             fun y(e: Double) = (size.height - (e - minE) / span * size.height * 0.9).toFloat()
@@ -358,7 +373,12 @@ fun WeekBars(km: List<Double>, goalKm: Int, modifier: Modifier = Modifier) {
     val bar = MaterialTheme.colorScheme.onSurface
     val soft = Cy.colors.border
     val accent = Cy.colors.accent
-    Canvas(modifier.fillMaxWidth().height(96.dp)) {
+    Canvas(
+        modifier.fillMaxWidth().height(96.dp).semantics {
+            contentDescription = "Weekly distance, oldest to this week: " +
+                km.joinToString(", ") { String.format(Locale.US, "%.1f km", it) } + ". Goal $goalKm km."
+        },
+    ) {
         val top = maxOf(km.maxOrNull() ?: 0.0, goalKm.toDouble(), 1.0) * 1.1
         val gap = 8.dp.toPx()
         val w = (size.width - gap * (km.size - 1)) / km.size
@@ -383,7 +403,12 @@ fun MiniBars(values: List<Double>, modifier: Modifier = Modifier) {
     if (values.isEmpty()) return
     val bar = MaterialTheme.colorScheme.onSurface
     val best = Cy.colors.accent
-    Canvas(modifier.fillMaxWidth().height(56.dp)) {
+    Canvas(
+        modifier.fillMaxWidth().height(56.dp).semantics {
+            contentDescription = "Bar chart, ${values.size} values from ${values.min().toInt()} to ${values.max().toInt()}, " +
+                "highest at bar ${values.indexOf(values.max()) + 1}"
+        },
+    ) {
         val top = values.max().coerceAtLeast(1.0)
         val gap = (if (values.size > 24) 2.dp else 5.dp).toPx()
         val w = ((size.width - gap * (values.size - 1)) / values.size).coerceAtLeast(1f)
@@ -413,7 +438,7 @@ fun WithContentColor(color: Color, content: @Composable () -> Unit) =
     CompositionLocalProvider(LocalContentColor provides color, content = content)
 
 @Composable
-fun CySwitch(checked: Boolean, onChange: (Boolean) -> Unit) {
+fun CySwitch(checked: Boolean, onChange: ((Boolean) -> Unit)?) {
     androidx.compose.material3.Switch(
         checked, onChange,
         colors = androidx.compose.material3.SwitchDefaults.colors(

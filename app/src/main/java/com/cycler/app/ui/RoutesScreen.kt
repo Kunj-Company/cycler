@@ -55,6 +55,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -123,10 +124,13 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
     val importGpx = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
+            var report: Gpx.ReadResult? = null
             val id = withContext(Dispatchers.IO) {
                 runCatching {
-                    val (name, pts) = ctx.contentResolver.openInputStream(uri)!!.use { Gpx.read(it) }
-                    if (pts.size < 2) return@runCatching null
+                    val rep = ctx.contentResolver.openInputStream(uri)!!.use { Gpx.readWithReport(it) }
+                    report = rep
+                    val (name, pts) = rep.name to rep.pts
+                    if (rep.tooLarge || pts.size < 2) return@runCatching null
                     val timed = pts.first().t > 0 && pts.last().t > pts.first().t
                     val dist = Geo.length(pts)
                     vm.store.save(
@@ -140,8 +144,17 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
                     )
                 }.getOrNull()
             }
-            if (id != null) vm.detailId = id
-            else Toast.makeText(ctx, "Couldn't read a route from that file", Toast.LENGTH_LONG).show()
+            val rep = report
+            if (id != null) {
+                vm.detailId = id
+                if (rep != null && rep.skipped > 0) {
+                    Toast.makeText(ctx, "Skipped ${rep.skipped} points with invalid coordinates", Toast.LENGTH_LONG).show()
+                }
+            } else Toast.makeText(
+                ctx,
+                if (rep?.tooLarge == true) "This file has too many points to import" else "Couldn't read a route from that file",
+                Toast.LENGTH_LONG,
+            ).show()
         }
     }
 
@@ -181,9 +194,10 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
                 }
                 vm.suggestError?.let {
                     Text(
-                        "Couldn't suggest routes: $it", color = Cy.colors.danger,
+                        it, color = Cy.colors.danger,
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp),
                     )
+                    TextButton({ vm.retrySuggest?.invoke() }, enabled = !vm.suggestBusy) { Text("Retry") }
                 }
                 if (vm.suggestions.isNotEmpty()) {
                     SectionLabel("Suggested from here", Modifier.padding(top = 22.dp, bottom = 2.dp))
@@ -242,9 +256,10 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
     val inspection = androidx.compose.ui.platform.LocalInspectionMode.current
     val metas by vm.store.metas.collectAsState()
     val meta = metas.firstOrNull { it.id == id }
-    val route by produceState<Route?>(null, id) { value = withContext(Dispatchers.IO) { vm.store.load(id) } }
-    var rename by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
+    var routeLoaded by remember(id) { mutableStateOf(false) }
+    val route by produceState<Route?>(null, id) { value = withContext(Dispatchers.IO) { vm.store.load(id) }; routeLoaded = true }
+    var rename by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var confirmDelete by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     // Heart rate: if Health Connect is connected and this ride has none yet, look for samples
     // recorded during it (a watch syncing through Samsung Health, for example).
     val hr by produceState(emptyList<Pair<Long, Int>>(), route, meta?.avgHr) {
@@ -261,15 +276,19 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
         }
     }
     // Traffic signals along the route, looked up once; null while loading or if the lookup fails.
-    val signals by produceState<List<Pt>?>(null, route) {
+    var sigTry by remember { mutableIntStateOf(0) }
+    var sigFailed by remember(id) { mutableStateOf(false) }
+    val signals by produceState<List<Pt>?>(null, route, sigTry) {
         val r = route
+        sigFailed = false
         value = if (r == null || inspection) null
-        else withContext(Dispatchers.IO) { runCatching { Overpass.signalsAlong(r.pts) }.getOrNull() }
+        else withContext(Dispatchers.IO) { vm.signalsCache.getOrLoad(id) { runCatching { Overpass.signalsAlong(r.pts) }.getOrNull() } }
+        if (r != null && !inspection && value == null) sigFailed = true
     }
 
     // Export: GPX for anything, TCX and FIT for recorded rides (they need timestamps).
-    var exportOpen by remember { mutableStateOf(false) }
-    var exportAs by remember { mutableStateOf("gpx") }
+    var exportOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var exportAs by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("gpx") }
     fun exportBytes(r: Route, format: String): ByteArray {
         val full = r.copy(meta = meta ?: r.meta)
         val hr = vm.store.heartRate(id)
@@ -281,13 +300,21 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
     }
     fun fileName(format: String) = (meta?.name ?: "ride").replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "ride" } + "." + format
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        val r = route
-        if (uri == null || r == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        if (uri == null) return@rememberLauncherForActivityResult
+        val format = exportAs
+        val app = ctx.applicationContext
+        // Runs in the view model's scope and loads the route itself, so a recreated screen does not lose it.
+        vm.viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { it.write(exportBytes(r, exportAs)) } }.isSuccess
+                runCatching {
+                    val r = route ?: vm.store.load(id) ?: error("route missing")
+                    app.contentResolver.openOutputStream(uri)!!.use { it.write(exportBytes(r, format)) }
+                }.isSuccess
             }
-            Toast.makeText(ctx, if (ok) "${exportAs.uppercase()} file saved" else "Couldn't save the file", Toast.LENGTH_SHORT).show()
+            if (!ok) withContext(Dispatchers.IO) {
+                runCatching { android.provider.DocumentsContract.deleteDocument(app.contentResolver, uri) }
+            }
+            Toast.makeText(app, if (ok) "${format.uppercase()} file saved" else "Couldn't save the file", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -326,6 +353,11 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                         Modifier.heightIn(max = 370.dp).verticalScroll(rememberScrollState())
                             .padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp),
                     ) {
+                        if (routeLoaded && r == null) {
+                            Text("This ride's track couldn't be read.", style = MaterialTheme.typography.bodyMedium, color = Cy.colors.danger)
+                            TextButton({ confirmDelete = true }) { Text("Delete", color = Cy.colors.danger) }
+                            Spacer(Modifier.height(8.dp))
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Tag(if (recorded) "Ride" else "Planned")
                             DifficultyTag(meta.difficulty)
@@ -351,7 +383,14 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                                 Metric("Stopped", Fmt.dur(meta.elapsedS - meta.durationS))
                             }
                             if (recorded && meta.stops > 0) Metric("Stops", "${meta.stops}")
-                            Metric("Signals", signals?.size?.toString() ?: "…")
+                            Metric(
+                                "Signals", signals?.size?.toString() ?: if (sigFailed) "–" else "…",
+                                Modifier.clip(Radius).clickable(enabled = sigFailed) { sigTry++ },
+                            )
+                            if (sigFailed) Text(
+                                "Couldn't load. Tap to retry.", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.Bottom),
+                            )
                         }
                         if (meta.avgHr > 0) {
                             Spacer(Modifier.height(12.dp))
@@ -505,8 +544,8 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                         }
                         Hairline()
                     }
-                    option("fit", "Send to Strava or another app", "Shares a FIT file through the share sheet.", timed, share = true)
-                    option("fit", "Save as FIT", "For Strava, Garmin Connect, TrainingPeaks and most coaching tools.", timed)
+                    option("fit", "Share FIT file with another app", "Shares a FIT file through the share sheet.", timed, share = true)
+                    option("fit", "Save as FIT", "Works with most fitness apps and coaching tools that import FIT files.", timed)
                     option("tcx", "Save as TCX", "Readable XML with time, distance and heart rate.", timed)
                     option("gpx", "Save as GPX", "The route's shape, for maps and navigation apps.", true)
                     if (!timed) {

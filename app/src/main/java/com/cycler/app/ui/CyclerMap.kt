@@ -19,6 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.dp
@@ -168,9 +174,11 @@ fun CyclerMap(
                 m.uiSettings.setAttributionMargins(0, statusTop + gap, gap, 0)
             }
             m.uiSettings.isTiltGesturesEnabled = false
+            // An initial point off the globe (a damaged ride) would throw; start on the default view.
+            val start = initial?.takeIf { it.lat.isFinite() && it.lon.isFinite() && it.lat in -90.0..90.0 && it.lon in -180.0..180.0 }
             m.cameraPosition = CameraPosition.Builder()
-                .target(LatLng(initial?.lat ?: 20.6, initial?.lon ?: 78.9))
-                .zoom(if (initial != null) initialZoom else 3.5)
+                .target(LatLng(start?.lat ?: 20.6, start?.lon ?: 78.9))
+                .zoom(if (start != null) initialZoom else 3.5)
                 .build()
             m.addOnMapLongClickListener { ll ->
                 longPress?.invoke(Pt(ll.latitude, ll.longitude))
@@ -190,6 +198,16 @@ fun CyclerMap(
         val l = MapView.OnDidFailLoadingMapListener { styleFailed = true }
         mapView.addOnDidFailLoadingMapListener(l)
         onDispose { mapView.removeOnDidFailLoadingMapListener(l) }
+    }
+
+    // While the real style is failing, try it again every 10 s once the phone has a network (this composable
+    // only exists while its screen is shown, so nothing runs in the background).
+    val appCtx = LocalContext.current.applicationContext
+    LaunchedEffect(styleFailed, styleKey) {
+        while (styleFailed) {
+            kotlinx.coroutines.delay(10_000)
+            if (hasNetwork(appCtx)) styleFailed = false
+        }
     }
 
     LaunchedEffect(map, styleKey, styleFailed) {
@@ -229,7 +247,10 @@ fun CyclerMap(
     }
 
     LaunchedEffect(styleTick, lines) {
-        if (styleTick > 0) map?.style?.getSourceAs<GeoJsonSource>(SRC_LINES)?.setGeoJson(linesJson(lines))
+        if (styleTick > 0) {
+            val json = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { linesJson(lines) }
+            map?.style?.getSourceAs<GeoJsonSource>(SRC_LINES)?.setGeoJson(json)
+        }
     }
     LaunchedEffect(styleTick, dots) {
         if (styleTick > 0) map?.style?.getSourceAs<GeoJsonSource>(SRC_DOTS)?.setGeoJson(dotsJson(dots))
@@ -254,8 +275,21 @@ fun CyclerMap(
         }
     }
 
-    AndroidView(factory = { mapView }, modifier = modifier)
+    androidx.compose.foundation.layout.Box(modifier) {
+        AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
+        if (styleFailed) {
+            MapChip(Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 22.dp)) {
+                Text("Map unavailable offline", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
 }
+
+/** True when the phone reports a connection that can reach the internet. */
+internal fun hasNetwork(ctx: android.content.Context): Boolean = runCatching {
+    val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+    cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+}.getOrDefault(false)
 
 @Composable
 private fun MapPlaceholder(modifier: Modifier, lines: List<MapLine>, dots: List<MapDot>) {

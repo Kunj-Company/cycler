@@ -1,5 +1,6 @@
 package com.cycler.app.ui
 
+import androidx.compose.foundation.selection.selectable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -80,9 +81,9 @@ private val ORANGE = Color(0xFFFB8C00)
 fun PlanScreen(vm: MainVm, myLoc: Pt?) {
     var camera by remember { mutableStateOf<CameraCmd?>(null) }
     var centred by remember { mutableStateOf(false) }
-    var showSave by remember { mutableStateOf(false) }
+    var showSave by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     /** Which field the full-screen place search is open for, if it is open. */
-    var searchFor by remember { mutableStateOf<Pick?>(null) }
+    var searchFor by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<Pick?>(null) }
 
     val mode = vm.planMode
     fun switchMode(i: Int) {
@@ -212,7 +213,7 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                                 Modifier.width(164.dp).clip(RoundedCornerShape(12.dp))
                                     .background(if (sel) Cy.colors.accentSoft else Color.Transparent)
                                     .border(if (sel) 1.5.dp else 1.dp, if (sel) Cy.colors.accent else Cy.colors.border, RoundedCornerShape(12.dp))
-                                    .clickable { vm.selected = i }.padding(14.dp),
+                                    .selectable(selected = sel, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = { vm.selected = i }).padding(14.dp),
                             ) {
                                 Text(
                                     o.label.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.labelMedium,
@@ -341,7 +342,8 @@ fun PlanScreen(vm: MainVm, myLoc: Pt?) {
                 }
                 vm.error?.let {
                     Spacer(Modifier.height(10.dp))
-                    Text("Couldn't find a route: $it", color = Cy.colors.danger, style = MaterialTheme.typography.bodySmall)
+                    Text(it, color = Cy.colors.danger, style = MaterialTheme.typography.bodySmall)
+                    androidx.compose.material3.TextButton({ vm.retryPlan?.invoke() }, enabled = !vm.busy) { Text("Retry") }
                 }
             }
         }
@@ -406,7 +408,7 @@ private fun PlaceSearch(
     title: String, near: Pt?, offerMyLocation: Boolean,
     onMyLocation: () -> Unit, onPickOnMap: () -> Unit, onPlace: (Photon.Place) -> Unit, onClose: () -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var places by remember { mutableStateOf(listOf<Photon.Place>()) }
     var searching by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }

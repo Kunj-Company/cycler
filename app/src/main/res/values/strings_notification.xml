@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Ride recording notification -->
+    <string name="rec_channel_name">Ride recording</string>
+    <string name="rec_title">Cycler is recording your ride</string>
+    <string name="rec_waiting_gps">Waiting for GPS…</string>
+    <string name="rec_paused">Paused</string>
+    <string name="rec_location_off">Location is off. Turn it on to keep recording.</string>
+    <string name="rec_progress">%1$.2f km · %2$.1f km/h</string>
+    <string name="rec_action_pause">Pause</string>
+    <string name="rec_action_resume">Resume</string>
+    <string name="rec_action_finish">Finish</string>
+
+    <!-- Messages shown to the rider -->
+    <string name="rec_no_permission">Couldn\'t start: Cycler needs precise location. Check the app\'s location permission.</string>
+    <string name="rec_too_short">Too short to save: no distance was recorded.</string>
+    <string name="rec_save_failed">Couldn\'t save the ride just now. It will be recovered next time you open Cycler.</string>
+    <string name="rec_recover_failed">Couldn\'t recover your last ride yet. Free up some space and reopen Cycler.</string>
+    <string name="rec_stopped_unexpectedly">Recording stopped unexpectedly. Your ride so far was saved.</string>
+    <string name="rec_interrupted">Your ride was interrupted at %1$s. It was saved as \"%2$s\".</string>
+    <string name="rec_interrupted_name">Interrupted ride %1$s</string>
+    <string name="rec_continued_after_kill">Recording was interrupted and has continued.</string>
+</resources>

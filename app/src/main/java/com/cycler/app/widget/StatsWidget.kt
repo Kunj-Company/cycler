@@ -13,7 +13,7 @@ class StatsWidget : BaseWidget() {
         fun build(ctx: Context, snap: WidgetSnapshot): RemoteViews {
             val rv = RemoteViews(ctx.packageName, R.layout.widget_stats)
             val days = WidgetData.lastSevenDays(snap.rides, snap.now)
-            rv.setImageViewBitmap(R.id.stats_chart, WidgetRender.weekBars(days, WidgetData.weekdayInitials(snap.now)))
+            rv.setImageViewBitmap(R.id.stats_chart, WidgetRender.weekBars(days, WidgetData.weekdayInitials(snap.now), label = ctx.getColor(R.color.widget_muted)))
             val month = WidgetData.month(snap)
             rv.setTextViewText(R.id.stats_month_distance, ctx.getString(R.string.widget_km, Fmt.kmShort(month.distanceM)))
             rv.setTextViewText(R.id.stats_month_rides, ctx.resources.getQuantityString(R.plurals.widget_rides, month.rides, month.rides))

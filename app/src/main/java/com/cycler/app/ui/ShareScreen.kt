@@ -1,5 +1,6 @@
 package com.cycler.app.ui
 
+import androidx.compose.foundation.selection.selectable
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.widget.Toast
@@ -84,22 +85,32 @@ fun ShareScreen(vm: MainVm, id: String, startMode: Int = 0, startEditing: Boolea
     val inspection = LocalInspectionMode.current
     val metas by vm.store.metas.collectAsState()
     val meta = metas.firstOrNull { it.id == id }
-    val route by produceState<Route?>(null, id) { value = withContext(Dispatchers.IO) { vm.store.load(id) } }
+    var routeLoaded by remember(id) { mutableStateOf(false) }
+    val route by produceState<Route?>(null, id) { value = withContext(Dispatchers.IO) { vm.store.load(id) }; routeLoaded = true }
     val tick by vm.store.mediaTick.collectAsState()
-    val files = remember(id, tick) { vm.store.media(id) }
+    val files by produceState(emptyList<java.io.File>(), id, tick) { value = withContext(Dispatchers.IO) { vm.store.media(id) } }
     val photos by produceState(emptyList<Bitmap>(), files) {
         value = withContext(Dispatchers.IO) { files.take(6).mapNotNull { loadShareImage(it) } }
     }
-    var mode by remember { mutableIntStateOf(startMode) }
-    var editing by remember { mutableStateOf(startEditing) }
-    var spec by remember(id) { mutableStateOf(CardSpec(meta?.name ?: "Ride")) }
+    var mode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(startMode) }
+    var editing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(startEditing) }
+    var spec by androidx.compose.runtime.saveable.rememberSaveable(id, stateSaver = CardSpecSaver) { mutableStateOf(CardSpec(meta?.name ?: "Ride")) }
     val styles = CardStyle.entries
     val pager = rememberPagerState { styles.size }
     val appDark = Cy.colors.isDark
-    var dark by remember { mutableStateOf(appDark) }
-    var exporting by remember { mutableStateOf(false) }
-    var progress by remember { mutableFloatStateOf(0f) }
-    var cancel by remember { mutableStateOf(false) }
+    var dark by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(appDark) }
+    val videoState by vm.video.collectAsState()
+    val exporting = videoState is VideoState.Running
+    val progress = (videoState as? VideoState.Running)?.progress ?: 0f
+    // The result of an export that finished while this screen was (re)attached.
+    LaunchedEffect(videoState) {
+        when (val v = videoState) {
+            is VideoState.Done -> { vm.video.value = VideoState.Idle; VideoExport.share(ctx, listOf(v.file), "video/mp4", v.caption) }
+            VideoState.Failed -> { vm.video.value = VideoState.Idle; Toast.makeText(ctx, "Couldn't make the video on this phone", Toast.LENGTH_LONG).show() }
+            VideoState.Cancelled -> { vm.video.value = VideoState.Idle; Toast.makeText(ctx, "Export cancelled", Toast.LENGTH_SHORT).show() }
+            else -> {}
+        }
+    }
 
     // Map pictures arrive a moment later; until then (or offline) the flyover uses a plain grid
     // and the map cards fall back to the route's outline.
@@ -142,8 +153,8 @@ fun ShareScreen(vm: MainVm, id: String, startMode: Int = 0, startEditing: Boolea
         }
     }
 
-    // Leaving the screen stops an export in progress.
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { cancel = true } }
+    // Leaving the screen stops an export in progress; a rotation (screen still open) does not.
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { if (vm.shareId == null) vm.cancelVideo(silent = true) } }
 
     fun shareFile(name: String) = File(ctx.cacheDir, "share").apply { mkdirs() }.resolve(name)
     val caption = meta?.let { "${it.name} · ${Fmt.km(it.distanceM)} · ↑ ${it.ascentM.toInt()} m" } ?: ""
@@ -172,6 +183,8 @@ fun ShareScreen(vm: MainVm, id: String, startMode: Int = 0, startEditing: Boolea
                             modifier = Modifier.fillMaxHeight().aspectRatio(9f / 16f).clip(RadiusLarge)
                                 .border(1.dp, Cy.colors.border, RadiusLarge),
                         )
+                    } else if (routeLoaded && route == null) {
+                        UnreadableTrack { vm.store.delete(id); vm.shareId = null; vm.detailId = null }
                     } else Text("Preparing…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else if (r != null && meta != null) {
@@ -219,7 +232,7 @@ fun ShareScreen(vm: MainVm, id: String, startMode: Int = 0, startEditing: Boolea
                     if (exporting) {
                         Progress(progress)
                         Spacer(Modifier.height(12.dp))
-                        CyButton("Cancel", { cancel = true }, Modifier.fillMaxWidth(), Btn.SECONDARY)
+                        CyButton("Cancel", { vm.cancelVideo() }, Modifier.fillMaxWidth(), Btn.SECONDARY)
                     } else {
                         CyButton(
                             "Make video and share",
@@ -227,23 +240,8 @@ fun ShareScreen(vm: MainVm, id: String, startMode: Int = 0, startEditing: Boolea
                                 val r = route
                                 val m = meta
                                 if (r != null && m != null) {
-                                    exporting = true
-                                    progress = 0f
-                                    cancel = false
-                                    val g = ground
-                                    val out = shareFile("cycler-flyover.mp4")
-                                    scope.launch {
-                                        val ok = withContext(Dispatchers.Default) {
-                                            // Its own scene: the preview's one is busy drawing on another thread.
-                                            VideoExport.export(
-                                                FlyoverScene(ctx, m, r.pts, g, dark), out,
-                                                { progress = it }, { cancel },
-                                            )
-                                        }
-                                        exporting = false
-                                        if (ok) VideoExport.share(ctx, listOf(out), "video/mp4", caption)
-                                        else if (!cancel) Toast.makeText(ctx, "Couldn't make the video on this phone", Toast.LENGTH_LONG).show()
-                                    }
+                                    // Runs in the view model, with its own scene: the preview's one is busy drawing.
+                                    vm.startVideo(m, r.pts, ground, dark, shareFile("cycler-flyover.mp4"), caption)
                                 }
                             },
                             Modifier.fillMaxWidth(), icon = Icons.Outlined.IosShare, enabled = scene != null, height = 52.dp,
@@ -289,6 +287,14 @@ fun ShareScreen(vm: MainVm, id: String, startMode: Int = 0, startEditing: Boolea
 }
 
 @Composable
+private fun UnreadableTrack(onDelete: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("This ride's track couldn't be read.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        androidx.compose.material3.TextButton(onDelete) { Text("Delete", color = Cy.colors.danger) }
+    }
+}
+
+@Composable
 fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
     Text(
         text, style = MaterialTheme.typography.labelLarge,
@@ -296,7 +302,7 @@ fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
         modifier = Modifier.clip(RoundedCornerShape(50))
             .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
             .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else Cy.colors.border, RoundedCornerShape(50))
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
+            .selectable(selected = selected, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
     )
 }
 

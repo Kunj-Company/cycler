@@ -6,6 +6,15 @@ object Changelog {
 
     val versions: List<Version> = listOf(
         Version(
+            "Unreleased",
+            listOf(
+                "The in-app update check is gone; updates now come from the store you installed from.",
+                "Android cloud backup is off. Use Back up everything to save a file yourself.",
+                "The Privacy page now lists exactly what each online request sends.",
+                "Place search sends your position rounded to about 1 km instead of 100 m.",
+            ),
+        ),
+        Version(
             "0.1.11",
             listOf(
                 "Elevation is now shown above sea level. Earlier rides are corrected too (Android 14 and newer).",

@@ -18,4 +18,15 @@ object GpsJump {
     /** Distance a live fix adds to a ride. A jump still moves the anchor (the point is stored) but adds nothing. */
     fun addedDistance(gapM: Double, dtMs: Long, keep: Boolean, skipNext: Boolean): Double =
         if (keep && !skipNext) countedLength(gapM, dtMs) else 0.0
+
+    /** Slowest implied speed, m/s, at which time across a gap still counts as riding. */
+    const val MOVING_MS = 0.7
+
+    /**
+     * Moving time to credit for a gap of [dtMs] with no fixes (a tunnel, poor reception) in which the
+     * rider covered [gapM]. The whole gap counts when the implied speed is a plausible cycling speed;
+     * a jump or a gap with no real movement counts for nothing.
+     */
+    fun gapMovingMs(gapM: Double, dtMs: Long): Long =
+        if (dtMs > 0 && !isJump(gapM, dtMs) && gapM / (dtMs / 1000.0) > MOVING_MS) dtMs else 0L
 }

@@ -8,7 +8,11 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /** A single point. [ele] is NaN when unknown, [t] is epoch millis or 0 when unknown. */
-data class Pt(val lat: Double, val lon: Double, val ele: Double = Double.NaN, val t: Long = 0L)
+/**
+ * A recorded or planned position. [brk] marks the first point after a break in the track
+ * (a manual pause, or recording that was interrupted): the segment leading to it has no length.
+ */
+data class Pt(val lat: Double, val lon: Double, val ele: Double = Double.NaN, val t: Long = 0L, val brk: Boolean = false)
 
 enum class RouteType { RECORDED, PLANNED }
 
@@ -348,6 +352,7 @@ object Geo {
 
     /** Distance between consecutive points, zero when the timestamps show it was a GPS jump. */
     fun segLen(a: Pt, b: Pt): Double {
+        if (b.brk) return 0.0
         val d = dist(a, b)
         return if (a.t > 0 && b.t > 0) GpsJump.countedLength(d, b.t - a.t) else d
     }

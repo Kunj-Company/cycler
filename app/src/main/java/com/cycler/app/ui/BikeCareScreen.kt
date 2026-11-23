@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -78,7 +80,7 @@ import java.util.Locale
 internal fun FilterPill(text: String, selected: Boolean, onClick: () -> Unit, trailing: ImageVector? = null) {
     val shape = RoundedCornerShape(50)
     val fg = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    Box(Modifier.heightIn(min = 44.dp).clip(shape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.heightIn(min = 44.dp).clip(shape).selectable(selected = selected, role = Role.RadioButton, onClick = onClick), contentAlignment = Alignment.Center) {
         Row(
             Modifier.clip(shape)
                 .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)

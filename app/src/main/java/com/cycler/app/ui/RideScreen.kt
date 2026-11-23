@@ -1,5 +1,6 @@
 package com.cycler.app.ui
 
+import androidx.compose.foundation.layout.widthIn
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.outlined.TurnRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -98,7 +100,8 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
     var follow by remember { mutableStateOf(vm.guide == null) }
     var zoomed by remember { mutableStateOf(false) }
     var camera by remember { mutableStateOf<CameraCmd?>(null) }
-    var showFinish by remember { mutableStateOf(false) }
+    var showFinish by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var confirmDiscard by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val now by produceState(System.currentTimeMillis()) {
         while (true) { delay(1000); value = System.currentTimeMillis() }
     }
@@ -156,7 +159,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
         if (st.guideDoneM >= c.startM) "Climbing · ${Fmt.km(c.endM - st.guideDoneM)} to the top"
         else "Climb in ${Fmt.km(c.startM - st.guideDoneM)} · ${Fmt.km(c.lengthM)} at ${c.gradePct.toInt()}%"
     }
-    var big by remember { mutableStateOf(false) }
+    var big by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val signals = vm.guideSignals
     val dots = remember(here, guide, signals) {
         buildList {
@@ -192,7 +195,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
                     }
                     Icon(
                         Icons.Outlined.Close, "Stop following",
-                        Modifier.size(20.dp).clip(Radius).clickable { vm.follow(null) },
+                        Modifier.clip(Radius).clickable(role = androidx.compose.ui.semantics.Role.Button) { vm.follow(null) }.minimumInteractiveComponentSize().size(20.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -278,11 +281,31 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
                 Row {
                     TextButton({
                         showFinish = false
-                        TrackingService.send(ctx, TrackingService.ACTION_DISCARD)
+                        confirmDiscard = true
                     }) { Text("Discard", color = Cy.colors.danger) }
                     TextButton({ showFinish = false }) { Text("Keep riding", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             },
+        )
+    }
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            shape = RadiusLarge,
+            title = { Text("Delete this ride?", style = MaterialTheme.typography.titleLarge) },
+            text = {
+                Text(
+                    "Delete this ${Fmt.km(st.distanceM)} ride? This can't be undone.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                TextButton({
+                    confirmDiscard = false
+                    TrackingService.send(ctx, TrackingService.ACTION_DISCARD)
+                }) { Text("Delete", color = Cy.colors.danger) }
+            },
+            dismissButton = { TextButton({ confirmDiscard = false }) { Text("Keep riding") } },
         )
     }
 }
@@ -297,6 +320,11 @@ private fun IdlePanel(
         Text(
             "Cycler uses your location to show where you are and to record rides. It stays on this phone.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(
+            "If the prompt doesn't appear, open Settings and set Location to Allow with Precise on.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
         )
         CyButton("Allow location", requestPermission, Modifier.fillMaxWidth(), height = 52.dp)
@@ -345,7 +373,7 @@ private fun IdlePanel(
         )
         if (w != null) {
             Icon(
-                Icons.Outlined.Close, "Remove workout", Modifier.size(18.dp).clip(Radius).clickable { vm.workout = null },
+                Icons.Outlined.Close, "Remove workout", Modifier.clip(Radius).clickable(role = androidx.compose.ui.semantics.Role.Button) { vm.workout = null }.minimumInteractiveComponentSize().size(18.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -391,7 +419,7 @@ private fun RecordingPanel(vm: MainVm, st: TrackState, now: Long, onBig: () -> U
         Spacer(Modifier.width(10.dp))
         Icon(
             Icons.Outlined.Fullscreen, "Big numbers",
-            Modifier.size(24.dp).clip(Radius).clickable(onClick = onBig),
+            Modifier.clip(Radius).clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onBig).minimumInteractiveComponentSize().size(24.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -522,8 +550,8 @@ private fun WorkoutPicker(vm: MainVm, onClose: () -> Unit) {
 private fun Stepper(label: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        CyButton("−", onMinus, Modifier.width(40.dp), Btn.SECONDARY, height = 34.dp)
-        Text(value, style = MaterialTheme.typography.titleSmall.tabular, modifier = Modifier.width(92.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-        CyButton("+", onPlus, Modifier.width(40.dp), Btn.SECONDARY, height = 34.dp)
+        CyButton("−", onMinus, Modifier.widthIn(min = 40.dp), Btn.SECONDARY, height = 34.dp)
+        Text(value, style = MaterialTheme.typography.titleSmall.tabular, modifier = Modifier.widthIn(min = 92.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        CyButton("+", onPlus, Modifier.widthIn(min = 40.dp), Btn.SECONDARY, height = 34.dp)
     }
 }

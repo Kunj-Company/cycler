@@ -22,17 +22,40 @@ class RouteStore private constructor(ctx: Context) {
     private val _metas = MutableStateFlow<List<RouteMeta>>(emptyList())
     val metas: StateFlow<List<RouteMeta>> = _metas
 
-    /** Set once the first load is done; every later reload (a save, rename, delete or restore) refreshes the home-screen widgets. */
+    /** Set once the first load is done; every later change refreshes the home-screen widgets. */
     private var loaded = false
 
-    /** Set while rides with raw GPS heights are being converted; see [convertHeightsLater]. Must exist before [reload] first runs. */
+    private val _isLoaded = MutableStateFlow(false)
+    /** False until the ride index has been read from disk (it is read on a background thread). */
+    val isLoaded: StateFlow<Boolean> = _isLoaded
+    private val loadedLatch = java.util.concurrent.CountDownLatch(1)
+
+    /** Set while rides with raw GPS heights are being converted; see [convertHeightsLater]. Must exist before the first load runs. */
     private val converting = java.util.concurrent.atomic.AtomicBoolean(false)
 
-    init { reload() }
+    init {
+        if (syncLoad) {
+            publishIndex(loadIndex())
+        } else {
+            Thread({ publishIndex(loadIndex()); Widgets.updateAll(appContext) }, "ride-index").start()
+        }
+    }
 
-    @Synchronized
-    fun reload() {
-        val list = dir.listFiles { f -> f.name.endsWith(".meta.json") }.orEmpty().mapNotNull { f ->
+    /** Blocks until the ride index has been loaded (for tests and background callers). */
+    fun awaitLoaded() { loadedLatch.await() }
+
+    private fun publishIndex(list: List<RouteMeta>) {
+        _metas.value = list
+        loaded = true
+        _isLoaded.value = true
+        loadedLatch.countDown()
+        convertHeightsLater()
+    }
+
+    /** Reads every meta file. Safe to call from any thread; takes no lock. */
+    private fun loadIndex(): List<RouteMeta> {
+        val files = dir.listFiles { f -> f.name.endsWith(".meta.json") }.orEmpty()
+        val list = files.mapNotNull { f ->
             runCatching {
                 var m = metaFromJson(JSONObject(f.readText()))
                 // A file whose id isn't a plain id could point outside the app's folders; ignore it.
@@ -50,37 +73,62 @@ class RouteStore private constructor(ctx: Context) {
                     }
                 }
                 m
-            }.getOrNull()
+            }.getOrNull() ?: rebuildMeta(f)
         }
-        _metas.value = list.sortedByDescending { it.createdAt }
+        return list.sortedByDescending { it.createdAt }
+    }
+
+    /**
+     * A meta file that is empty or unreadable (for instance after power loss) must not hide the ride
+     * while its points are still fine: rebuild the summary from the points.
+     */
+    private fun rebuildMeta(metaFile: File): RouteMeta? = runCatching {
+        val id = metaFile.name.removeSuffix(".meta.json")
+        if (!isSafeId(id)) return@runCatching null
+        val pts = readPoints(id)
+        if (pts.size < 2) return@runCatching null
+        val timed = pts.first().t > 0
+        val first = if (timed) pts.first().t else File(dir, "$id.pts.json").lastModified()
+        val durS = if (timed && pts.last().t > pts.first().t) (pts.last().t - pts.first().t) / 1000 else 0L
+        val m = RouteMeta(
+            id, "Recovered ride", RouteType.RECORDED, first, Geo.length(pts), Geo.ascent(pts), durS,
+            pts.first().lat, pts.first().lon, 0.0, durS, Geo.simplify(pts), 0,
+            Geo.bestEfforts(pts), FORMAT, alt = Altitude.GPS,
+        )
+        writeSafely(metaFile, metaToJson(m).toString())
+        m
+    }.getOrNull()
+
+    /** Re-reads everything from disk, replacing the in-memory index. */
+    @Synchronized
+    fun reload() {
+        _metas.value = loadIndex()
         if (loaded) Widgets.updateAll(appContext) else loaded = true
+        _isLoaded.value = true
+        loadedLatch.countDown()
         convertHeightsLater()
+    }
+
+    /** Replaces one ride in the in-memory list (no disk reads) and refreshes the widgets. */
+    private fun patch(meta: RouteMeta) {
+        _metas.value = (_metas.value.filter { it.id != meta.id } + meta).sortedByDescending { it.createdAt }
+        Widgets.updateAll(appContext)
     }
 
     /**
      * Rides recorded with raw GPS heights get heights above sea level, on a background thread
-     * (the geoid lookup reads from disk). Needs Android 14+; on older phones the rides keep
-     * raw heights, marked as such, and are converted if the phone or a restore moves them on.
+     * (the geoid lookup reads from disk). Android 14+ uses the system model; older phones use the
+     * bundled coarse EGM96 grid (see [GeoidModel]).
      */
     private fun convertHeightsLater() {
-        if (!Geoid.available) return
         if (_metas.value.none { it.alt == Altitude.GPS }) return
         if (!converting.compareAndSet(false, true)) return
         Thread {
             try {
-                val geoid = Geoid(appContext)
+                val geoidAt = GeoidSource.open(appContext) ?: return@Thread
                 var changed = false
                 for (m in _metas.value.filter { it.alt == Altitude.GPS }) {
-                    val pts = synchronized(this) { readPoints(m.id) }
-                    val msl = Altitude.toMsl(pts, geoid::heightAt) ?: continue
-                    synchronized(this) {
-                        // Skip a ride that was deleted or changed while converting.
-                        val now = _metas.value.firstOrNull { it.id == m.id } ?: return@synchronized
-                        if (now.alt != Altitude.GPS) return@synchronized
-                        writeSafely(File(dir, "${m.id}.pts.json"), pointsToJson(msl))
-                        writeSafely(File(dir, "${m.id}.meta.json"), metaToJson(now.copy(alt = Altitude.MSL)).toString())
-                        changed = true
-                    }
+                    if (convertHeights(m.id, geoidAt)) changed = true
                 }
                 if (changed) reload()
             } finally {
@@ -88,6 +136,53 @@ class RouteStore private constructor(ctx: Context) {
             }
         }.start()
     }
+
+    /**
+     * Converts one ride. The points file and the meta file cannot be replaced together, so before
+     * touching either, a small `<id>.conv` note records a fingerprint of the raw points and of the
+     * converted points. If the app is killed between the two writes, the next run sees that the
+     * points already match the converted fingerprint and only finishes the meta, so heights are
+     * never converted twice. (The note has no .json ending, so it is not part of backups.)
+     */
+    internal fun convertHeights(id: String, geoidAt: (Double, Double) -> Double?): Boolean {
+        if (!isSafeId(id)) return false
+        val ptsFile = File(dir, "$id.pts.json")
+        val note = File(dir, "$id.conv")
+        val (rawText, pts) = synchronized(this) {
+            val t = runCatching { ptsFile.readText() }.getOrNull()
+            t to readPoints(id)
+        }
+        if (rawText == null || pts.isEmpty()) return false
+        val rawPrint = fingerprint(rawText)
+        val saved = runCatching { note.readText().trim().split(' ') }.getOrNull()
+        if (saved != null && saved.size == 2 && saved[1] == rawPrint) {
+            // Interrupted after the points were converted: only the meta is left to update.
+            return synchronized(this) {
+                val now = _metas.value.firstOrNull { it.id == id }
+                if (now != null && now.alt == Altitude.GPS) {
+                    writeSafely(File(dir, "$id.meta.json"), metaToJson(now.copy(alt = Altitude.MSL)).toString())
+                }
+                note.delete()
+                now != null
+            }
+        }
+        val msl = Altitude.toMsl(pts, geoidAt) ?: return false
+        val mslText = pointsToJson(msl)
+        synchronized(this) {
+            // Skip a ride that was deleted or changed while converting.
+            val now = _metas.value.firstOrNull { it.id == id } ?: return false
+            if (now.alt != Altitude.GPS) return false
+            writeSafely(note, rawPrint + " " + fingerprint(mslText))
+            writeSafely(ptsFile, mslText)
+            writeSafely(File(dir, "$id.meta.json"), metaToJson(now.copy(alt = Altitude.MSL)).toString())
+            note.delete()
+        }
+        return true
+    }
+
+    private fun fingerprint(text: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).take(12)
+            .joinToString("") { "%02x".format(it) }
 
     @Synchronized
     fun save(
@@ -112,11 +207,14 @@ class RouteStore private constructor(ctx: Context) {
         )
         writeSafely(File(dir, "$id.pts.json"), pointsToJson(pts))
         writeSafely(File(dir, "$id.meta.json"), metaToJson(meta).toString())
-        reload()
+        awaitLoaded()
+        patch(meta)
+        convertHeightsLater()
         return id
     }
 
     fun load(id: String): Route? {
+        awaitLoaded()
         val meta = _metas.value.firstOrNull { it.id == id } ?: return null
         val pts = readPoints(id)
         return if (pts.isEmpty()) null else Route(meta, pts)
@@ -128,6 +226,7 @@ class RouteStore private constructor(ctx: Context) {
             val a = JSONArray().put(p.lat).put(p.lon)
             a.put(if (p.ele.isNaN()) JSONObject.NULL else p.ele)
             a.put(p.t)
+            if (p.brk) a.put(1)
             arr.put(a)
         }
         return arr.toString()
@@ -142,7 +241,11 @@ class RouteStore private constructor(ctx: Context) {
             val pts = ArrayList<Pt>(arr.length())
             for (i in 0 until arr.length()) {
                 val a = arr.getJSONArray(i)
-                pts.add(Pt(a.getDouble(0), a.getDouble(1), a.optDouble(2, Double.NaN), a.optLong(3, 0L)))
+                val lat = a.getDouble(0)
+                val lon = a.getDouble(1)
+                // A stored point off the globe would crash the map; drop it.
+                if (!Gpx.validCoord(lat, lon)) continue
+                pts.add(Pt(lat, lon, a.optDouble(2, Double.NaN), a.optLong(3, 0L), a.optInt(4, 0) == 1))
             }
             pts
         }.getOrDefault(emptyList())
@@ -150,21 +253,24 @@ class RouteStore private constructor(ctx: Context) {
 
     @Synchronized
     fun rename(id: String, name: String) {
+        awaitLoaded()
         val meta = _metas.value.firstOrNull { it.id == id } ?: return
-        writeSafely(File(dir, "$id.meta.json"), metaToJson(meta.copy(name = name.ifBlank { meta.name })).toString())
-        reload()
+        val updated = meta.copy(name = name.ifBlank { meta.name })
+        writeSafely(File(dir, "$id.meta.json"), metaToJson(updated).toString())
+        patch(updated)
     }
 
     /** Save what the rider filled in after the ride. */
     @Synchronized
     fun updateDetails(id: String, name: String, notes: String, feeling: Int, tags: List<String>) {
+        awaitLoaded()
         val meta = _metas.value.firstOrNull { it.id == id } ?: return
         val updated = meta.copy(
             name = name.ifBlank { meta.name }, notes = notes.trim(), feeling = feeling.coerceIn(0, 5),
             tags = tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
         )
         writeSafely(File(dir, "$id.meta.json"), metaToJson(updated).toString())
-        reload()
+        patch(updated)
     }
 
     @Synchronized
@@ -174,7 +280,9 @@ class RouteStore private constructor(ctx: Context) {
         File(dir, "$id.pts.json").delete()
         File(dir, "$id.hr.json").delete()
         mediaDir(id).deleteRecursively()
-        reload()
+        awaitLoaded()
+        _metas.value = _metas.value.filter { it.id != id }
+        Widgets.updateAll(appContext)
     }
 
     // --- Heart rate for a ride, from Health Connect: [epoch millis, bpm] pairs in <id>.hr.json ---
@@ -187,6 +295,7 @@ class RouteStore private constructor(ctx: Context) {
     @Synchronized
     fun saveHeartRate(id: String, samples: List<Pair<Long, Int>>) {
         if (!isSafeId(id)) return
+        awaitLoaded()
         val meta = _metas.value.firstOrNull { it.id == id } ?: return
         if (samples.isEmpty()) return
         val a = JSONArray()
@@ -194,7 +303,7 @@ class RouteStore private constructor(ctx: Context) {
         writeSafely(File(dir, "$id.hr.json"), a.toString())
         val updated = meta.copy(avgHr = samples.map { it.second }.average().toInt(), maxHr = samples.maxOf { it.second })
         writeSafely(File(dir, "$id.meta.json"), metaToJson(updated).toString())
-        reload()
+        patch(updated)
     }
 
     // --- Segments: one JSON file each in segments/, holding the road and the efforts found so far ---
@@ -252,6 +361,7 @@ class RouteStore private constructor(ctx: Context) {
      */
     @Synchronized
     fun refreshSegments(): List<SegmentFile> {
+        awaitLoaded()
         val rides = _metas.value.filter { it.type == RouteType.RECORDED }
         val ids = rides.map { it.id }.toSet()
         var changed = false
@@ -326,6 +436,7 @@ class RouteStore private constructor(ctx: Context) {
                     zip.closeEntry()
                 }
             }
+            awaitLoaded()
             _metas.value.forEach { m ->
                 load(m.id)?.let { r ->
                     val safe = m.name.replace(Regex("[^A-Za-z0-9 _-]"), "").trim().ifBlank { "route" }
@@ -413,38 +524,132 @@ class RouteStore private constructor(ctx: Context) {
         return ok
     }
 
-    /** If the app died mid-ride, turn the leftover points into a saved ride. */
-    fun recoverUnfinished(): String? {
+    /** What the recording file holds: the points plus the ride state that was written alongside them. */
+    class Recording(
+        val pts: List<Pt>, val movingMs: Long, val maxSpeedMs: Double, val stops: Int, val elapsedMs: Long,
+        val laps: List<LapMark>, val paused: Boolean,
+    )
+
+    /**
+     * Reads recording.csv. Point lines are `lat,lon,ele,t` and may carry `,brk,movingMs,maxSpeedMs,stops,elapsedMs`;
+     * `#L`, `#P` and `#R` lines record laps, pauses and resumes. Old four-column files and half-written
+     * lines are fine. Returns null when there is no file.
+     */
+    fun readRecording(): Recording? {
         if (!recordingFile.exists()) return null
         // Read line by line: a half-written last line must not cost the whole ride.
-        val pts = runCatching { recordingFile.readLines() }.getOrDefault(emptyList()).mapNotNull { line ->
+        val lines = runCatching { recordingFile.readLines() }.getOrDefault(emptyList())
+        val pts = ArrayList<Pt>()
+        val laps = ArrayList<LapMark>()
+        var moving = -1L; var maxSpeed = 0.0; var stops = 0; var elapsed = -1L; var paused = false
+        for (line in lines) {
             val p = line.split(',')
+            if (line.startsWith("#")) {
+                when (p[0]) {
+                    "#L" -> {
+                        val d = p.getOrNull(1)?.toDoubleOrNull(); val m = p.getOrNull(2)?.toLongOrNull(); val e = p.getOrNull(3)?.toLongOrNull()
+                        if (d != null && m != null && e != null) laps.add(LapMark(d, m, e))
+                    }
+                    "#P" -> {
+                        val m = p.getOrNull(2)?.toLongOrNull(); val e = p.getOrNull(3)?.toLongOrNull()
+                        if (m != null && e != null) { moving = m; elapsed = e; paused = true }
+                    }
+                    "#R" -> paused = false
+                }
+                continue
+            }
             val lat = p.getOrNull(0)?.toDoubleOrNull()
             val lon = p.getOrNull(1)?.toDoubleOrNull()
             val t = p.getOrNull(3)?.trim()?.toLongOrNull()
-            if (lat == null || lon == null || t == null) null
-            else Pt(lat, lon, p.getOrNull(2)?.toDoubleOrNull() ?: Double.NaN, t)
+            if (lat == null || lon == null || t == null) continue
+            val brk = p.getOrNull(4)?.trim() == "1"
+            pts.add(Pt(lat, lon, p.getOrNull(2)?.toDoubleOrNull() ?: Double.NaN, t, brk))
+            paused = false
+            val m = p.getOrNull(5)?.toLongOrNull(); val mx = p.getOrNull(6)?.toDoubleOrNull()
+            val st = p.getOrNull(7)?.toIntOrNull(); val e = p.getOrNull(8)?.trim()?.toLongOrNull()
+            if (m != null && mx != null && st != null && e != null) { moving = m; maxSpeed = mx; stops = st; elapsed = e }
         }
-        if (pts.size < 2) {
+        if (moving < 0) {
+            // Old format: no state was written. Work moving time out from the points; a long stop is not riding.
+            moving = 0
+            for (i in 1 until pts.size) {
+                val b = pts[i]
+                if (b.brk) continue
+                val dt = b.t - pts[i - 1].t
+                if (dt > 0 && dt <= 10_000) { if (dist(pts[i - 1], b) / (dt / 1000.0) > 0.7 && !GpsJump.isJump(dist(pts[i - 1], b), dt)) moving += dt }
+                else moving += GpsJump.gapMovingMs(dist(pts[i - 1], b), dt)
+            }
+            elapsed = moving
+        }
+        return Recording(pts, moving, maxSpeed, stops, elapsed, laps, paused)
+    }
+
+    private fun dist(a: Pt, b: Pt) = Geo.dist(a, b)
+
+    /** Outcome of [recoverUnfinishedResult]. */
+    sealed class Recovery {
+        object None : Recovery()
+        /** Saved as [id]; the recording was cut off at [interruptedAt] (epoch ms). */
+        class Saved(val id: String, val interruptedAt: Long) : Recovery()
+        /** The ride could not be written (storage full?); recording.csv was kept for another try. */
+        object Failed : Recovery()
+    }
+
+    /** If the app died mid-ride, turn the leftover points into a saved ride. Never throws. */
+    fun recoverUnfinished(): String? = (recoverUnfinishedResult() as? Recovery.Saved)?.id
+
+    @Synchronized
+    fun recoverUnfinishedResult(): Recovery {
+        try {
+            val rec = readRecording() ?: return Recovery.None
+            val pts = rec.pts
+            if (pts.size < 2) {
+                recordingFile.delete()
+                return Recovery.None
+            }
+            val distance = Geo.length(pts)
+            val moving = rec.movingMs / 1000
+            val elapsed = maxOf(rec.elapsedMs / 1000, moving)
+            // As when a ride is finished: what was ridden after the last mark is the final lap.
+            val last = rec.laps.lastOrNull()
+            val laps = if (rec.laps.isEmpty()) rec.laps
+            else if (distance - last!!.distanceM > 20.0) rec.laps + LapMark(distance, rec.movingMs, rec.elapsedMs) else rec.laps
+            val name = appContext.getString(
+                com.cycler.app.R.string.rec_interrupted_name,
+                java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(pts.first().t)),
+            )
+            val id = save(
+                name, RouteType.RECORDED, pts, moving,
+                distanceM = distance,
+                ascentM = Geo.ascent(pts, 4.0, smooth = true), createdAt = pts.first().t, elapsedS = elapsed,
+                maxSpeedMs = rec.maxSpeedMs, stops = rec.stops, laps = laps,
+                alt = Altitude.GPS,
+            )
+            // Only now is it safe to drop the raw recording.
             recordingFile.delete()
-            return null
+            return Recovery.Saved(id, pts.last().t)
+        } catch (e: Exception) {
+            // Keep recording.csv: the next launch tries again.
+            return Recovery.Failed
         }
-        val dur = ((pts.last().t - pts.first().t) / 1000).coerceAtLeast(0)
-        val id = save(
-            "Recovered ride", RouteType.RECORDED, pts, dur,
-            ascentM = Geo.ascent(pts, 4.0, smooth = true), createdAt = pts.first().t, elapsedS = dur,
-            alt = Altitude.GPS,
-        )
-        // Only now is it safe to drop the raw recording.
-        recordingFile.delete()
-        return id
     }
 
     /** Write to a temporary file and swap it in, so a kill mid-write can't leave a broken file. */
     private fun writeSafely(target: File, text: String) {
         val tmp = File(target.parentFile, target.name + ".tmp")
-        tmp.writeText(text)
-        if (!tmp.renameTo(target)) {
+        // Flush to disk before the rename, so a power cut cannot leave an empty file under the real name.
+        java.io.FileOutputStream(tmp).use { out ->
+            out.write(text.toByteArray())
+            out.flush()
+            out.fd.sync()
+        }
+        val moved = runCatching {
+            java.nio.file.Files.move(
+                tmp.toPath(), target.toPath(),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        }.isSuccess
+        if (!moved && !tmp.renameTo(target)) {
             target.writeText(text)
             tmp.delete()
         }
@@ -517,7 +722,9 @@ class RouteStore private constructor(ctx: Context) {
         }
         @Volatile private var inst: RouteStore? = null
         /** For tests only: forget the shared instance so the next get() starts clean. */
-        internal fun resetForTests() { inst = null }
+        internal fun resetForTests() { inst = null; syncLoad = true }
+        /** Tests (which call [resetForTests]) load the index synchronously so metas are visible right away. */
+        @Volatile private var syncLoad = false
 
         fun get(ctx: Context): RouteStore =
             inst ?: synchronized(this) { inst ?: RouteStore(ctx.applicationContext).also { inst = it } }
@@ -529,10 +736,10 @@ class Prefs(ctx: Context) {
     private val sp = ctx.getSharedPreferences("cycler", Context.MODE_PRIVATE)
 
     var profile: String
-        get() = sp.getString("profile", "trekking")!!
+        get() = sp.getString("profile", "trekking")!!.takeIf { it in PROFILES } ?: "trekking"
         set(v) = sp.edit().putString("profile", v).apply()
     var mapStyle: String
-        get() = sp.getString("mapStyle", "liberty")!!
+        get() = sp.getString("mapStyle", "liberty")!!.takeIf { it in MAP_STYLES } ?: "liberty"
         set(v) = sp.edit().putString("mapStyle", v).apply()
     var keepScreenOn: Boolean
         get() = sp.getBoolean("keepScreenOn", true)
@@ -551,7 +758,7 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("voice", false)
         set(v) = sp.edit().putBoolean("voice", v).apply()
     var weeklyGoalKm: Int
-        get() = sp.getInt("weeklyGoalKm", 50)
+        get() = sp.getInt("weeklyGoalKm", 50).coerceAtLeast(1)
         set(v) { sp.edit().putInt("weeklyGoalKm", v).apply(); Widgets.updateAll(appContext) }
     /** Whether the first-launch setup has been completed or skipped. */
     var onboarded: Boolean
@@ -635,15 +842,21 @@ class Prefs(ctx: Context) {
     internal class Spec(val type: Char, val min: Int = 0, val max: Int = 0, val allowed: Set<String>? = null)
 
     companion object {
+        /** BRouter profile ids the app can ask for (see Net.kt). */
+        internal val PROFILES = setOf("fastbike", "trekking", "gravel", "mtb")
+        /** Map style keys the app knows (see MapStyles in CyclerMap.kt). */
+        internal val MAP_STYLES = setOf("liberty", "bright", "positron", "dark", "cyclosm")
+
         /** The only keys a backup carries or restores; everything else in the file is device or transient state. */
         internal val SPEC: Map<String, Spec> = mapOf(
-            "profile" to Spec('s', max = 64), "mapStyle" to Spec('s', max = 64),
+            "profile" to Spec('s', max = 64, allowed = PROFILES),
+            "mapStyle" to Spec('s', max = 64, allowed = MAP_STYLES),
             "keepScreenOn" to Spec('b'),
             "themeMode" to Spec('s', max = 16, allowed = setOf("system", "light", "dark")),
             "autoPause" to Spec('b'), "autoPauseLevel" to Spec('i', 0, 2),
             "offRouteAlert" to Spec('b'),
             "voice" to Spec('b'), "voiceEveryKm" to Spec('i', 1, 100), "turnCues" to Spec('b'),
-            "weeklyGoalKm" to Spec('i', 0, 100_000), "advancedStats" to Spec('b'),
+            "weeklyGoalKm" to Spec('i', 1, 100_000), "advancedStats" to Spec('b'),
             "weightKg" to Spec('i', 0, 1000), "autoLapKm" to Spec('i', 0, 1000),
             "ridePages" to Spec('s', max = 1000), "customWorkout" to Spec('s', max = 200),
             "onboarded" to Spec('b'),
