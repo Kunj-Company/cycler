@@ -6,6 +6,12 @@ object Changelog {
 
     val versions: List<Version> = listOf(
         Version(
+            "0.1.11",
+            listOf(
+                "Elevation is now shown above sea level. Earlier rides are corrected too (Android 14 and newer).",
+            ),
+        ),
+        Version(
             "0.1.10",
             listOf(
                 "Check for updates in Settings → Updates.",

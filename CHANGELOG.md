@@ -2,6 +2,17 @@
 
 All notable changes to Cycler. Versions are tagged in Git as `v0.1.N`.
 
+## 0.1.11
+
+### Fixed
+- Elevation is shown above sea level. GPS reports height above a mathematical model of the
+  Earth, which around India is about 90 m below sea level, so rides could show heights
+  like −90 m. Rides recorded by earlier versions are corrected once, in the background
+  (Android 14 and newer).
+
+### Changed
+- README with screenshots of the app and its widgets.
+
 ## 0.1.10
 
 First release on GitHub, signed with the release key.
