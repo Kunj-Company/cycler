@@ -206,6 +206,19 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** False until the first-launch setup is done; riders who already have rides never see it. */
     var onboarded by mutableStateOf(prefs.onboarded || store.metas.value.isNotEmpty())
     var showCare by mutableStateOf(false)
+    /** The support card on the Rides tab. Decided once per app start, so it never pops up mid-session. */
+    var supportCard by mutableStateOf(false)
+    private var supportChecked = false
+
+    fun maybeShowSupport(rideCount: Int) {
+        if (supportChecked || !BuildConfig.SUPPORT_PROMPT || !onboarded) return
+        supportChecked = true
+        val now = System.currentTimeMillis()
+        if (com.cycler.app.data.SupportPrompt.due(rideCount, prefs.supportAskedAt, now)) {
+            supportCard = true
+            prefs.supportAskedAt = now
+        }
+    }
     /** Period, sort, search and tag chosen on the Rides tab; kept while the app is open. */
     var rideFilter by mutableStateOf(com.cycler.app.data.RideFilter())
 

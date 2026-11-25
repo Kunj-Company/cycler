@@ -519,6 +519,9 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     SimpleLinkRow("Open-source notices") { open("notices") }
     AboutLinkRow("Privacy policy", "Full text on GitHub", PRIVACY_POLICY_URL)
     AboutLinkRow("Source code on GitHub", "github.com/Kunj-Company/cycler", REPO_URL)
+    if (com.cycler.app.BuildConfig.SUPPORT_PROMPT) {
+        AboutLinkRow("Buy me a coffee", "Cycler is free and made by one person", com.cycler.app.data.SupportPrompt.URL)
+    }
     Spacer(Modifier.height(28.dp))
     SectionLabel("Credits")
     Spacer(Modifier.height(8.dp))
@@ -534,7 +537,7 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     }
 }
 
-private fun openUrl(ctx: android.content.Context, url: String): Boolean = runCatching {
+internal fun openUrl(ctx: android.content.Context, url: String): Boolean = runCatching {
     ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }.isSuccess
 

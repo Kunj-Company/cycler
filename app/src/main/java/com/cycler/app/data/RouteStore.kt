@@ -731,6 +731,16 @@ class RouteStore private constructor(ctx: Context) {
     }
 }
 
+/** When to show the quiet "buy me a coffee" card: after a few rides, then at most once every two weeks. */
+object SupportPrompt {
+    const val URL = "https://buymeacoffee.com/abhiramnj"
+    const val MIN_RIDES = 3
+    const val EVERY_MS = 14L * 24 * 60 * 60 * 1000
+
+    fun due(rideCount: Int, lastAskedAt: Long, now: Long): Boolean =
+        rideCount >= MIN_RIDES && (lastAskedAt <= 0L || now - lastAskedAt >= EVERY_MS || now < lastAskedAt)
+}
+
 class Prefs(ctx: Context) {
     private val appContext = ctx.applicationContext
     private val sp = ctx.getSharedPreferences("cycler", Context.MODE_PRIVATE)
@@ -764,6 +774,10 @@ class Prefs(ctx: Context) {
     var onboarded: Boolean
         get() = sp.getBoolean("onboarded", false)
         set(v) = sp.edit().putBoolean("onboarded", v).apply()
+    /** When the support card was last shown (epoch ms; 0 = never). Device state, not part of backups. */
+    var supportAskedAt: Long
+        get() = sp.getLong("supportAskedAt", 0L)
+        set(v) = sp.edit().putLong("supportAskedAt", v).apply()
     /** Whether ride pages open with the detailed numbers showing. */
     var advancedStats: Boolean
         get() = sp.getBoolean("advancedStats", false)

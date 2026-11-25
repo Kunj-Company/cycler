@@ -157,6 +157,7 @@ fun RidesScreen(vm: MainVm) {
     var sortMenu by remember { mutableStateOf(false) }
     var tagMenu by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
+    LaunchedEffect(loaded, rides.size) { if (loaded) vm.maybeShowSupport(rides.size) }
     LaunchedEffect(searchOpen) { if (searchOpen && f.query.isEmpty()) runCatching { focus.requestFocus() } }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -185,6 +186,9 @@ fun RidesScreen(vm: MainVm) {
                     }
                 }
             }
+        }
+        if (vm.supportCard && rides.isNotEmpty()) {
+            item(key = "support") { SupportCard(onClose = { vm.supportCard = false }) }
         }
         if (rides.isNotEmpty()) {
             if (searchOpen) {
@@ -495,5 +499,30 @@ fun EditRideScreen(vm: MainVm, id: String) {
                 CyButton(if (isNew) "Save ride" else "Save changes", { close(save = true) }, Modifier.fillMaxWidth(), height = 52.dp)
             }
         }
+    }
+}
+
+
+/** A quiet, dismissible card asking for support. Never covers anything: it sits in the Rides list. */
+@Composable
+private fun SupportCard(onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+            .border(1.dp, Cy.colors.border, Radius).padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Enjoying Cycler?", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "It is free, with no ads or tracking, and made by one person. If it helps your rides, you can buy me a coffee.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            TextButton({ openUrl(ctx, com.cycler.app.data.SupportPrompt.URL); onClose() }, contentPadding = PaddingValues(horizontal = 0.dp)) {
+                Text("Buy me a coffee")
+            }
+        }
+        IconButton(onClose) { Icon(Icons.Outlined.Close, "Close", Modifier.size(20.dp)) }
     }
 }

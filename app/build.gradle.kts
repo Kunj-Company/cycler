@@ -22,6 +22,8 @@ android {
         targetSdk = 36
         versionCode = 12
         versionName = "0.1.12"
+        // Show the "buy me a coffee" card and About link. Build without it with -PsupportPrompt=false.
+        buildConfigField("boolean", "SUPPORT_PROMPT", (project.findProperty("supportPrompt") ?: "true").toString())
         // Only the 64-bit ARM build of the map engine (real phones, Apple-silicon emulators).
         // Remove this line if you need other CPU types.
         ndk { abiFilters += "arm64-v8a" }
@@ -49,7 +51,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
