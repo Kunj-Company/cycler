@@ -180,9 +180,11 @@ data class RideFilter(
     val sort: RideSort = RideSort.NEWEST,
     val query: String = "",
     val tag: String? = null,
+    /** Only rides on this bike (experimental, multiple bikes); null for all bikes. */
+    val bikeId: String? = null,
 ) {
     /** True when the list is showing everything in the default order. */
-    val isDefault get() = period == RidePeriod.ALL && query.isBlank() && tag == null
+    val isDefault get() = period == RidePeriod.ALL && query.isBlank() && tag == null && bikeId == null
 }
 
 object RideFilters {
@@ -190,6 +192,7 @@ object RideFilters {
 
     fun apply(
         rides: List<RouteMeta>, f: RideFilter, now: Long = System.currentTimeMillis(), tz: TimeZone = TimeZone.getDefault(),
+        bikes: BikeList? = null,
     ): List<RouteMeta> {
         val from = when (f.period) {
             RidePeriod.ALL -> Long.MIN_VALUE
@@ -200,6 +203,7 @@ object RideFilters {
         val q = f.query.trim()
         val out = rides.filter { m ->
             m.createdAt >= from &&
+                (f.bikeId == null || bikes == null || bikes.ownerOf(m.bikeId) == f.bikeId) &&
                 (f.tag == null || m.tags.any { it.equals(f.tag, ignoreCase = true) }) &&
                 (q.isEmpty() || m.name.contains(q, true) || m.notes.contains(q, true) || m.tags.any { it.contains(q, true) })
         }
@@ -245,8 +249,10 @@ object Care {
     }
 
     /** Distance since the job was done comes from the rides recorded after that moment. */
-    fun status(item: CareItem, rides: List<RouteMeta>, now: Long, tz: TimeZone = TimeZone.getDefault()): CareStatus {
-        val used = rides.filter { it.createdAt > item.resetAt }.sumOf { it.distanceM } / 1000
+    fun status(item: CareItem, rides: List<RouteMeta>, now: Long, tz: TimeZone = TimeZone.getDefault(), bikes: BikeList? = null): CareStatus {
+        // With several bikes only the rides on the job's own bike count towards it.
+        val mine = if (bikes == null) rides else bikes.ownerOf(item.bikeId).let { b -> rides.filter { bikes.ownerOf(it.bikeId) == b } }
+        val used = mine.filter { it.createdAt > item.resetAt }.sumOf { it.distanceM } / 1000
         val days = if (item.resetAt > 0) daysBetween(item.resetAt, now, tz).coerceAtLeast(0) else null
         val kmDue = item.everyKm > 0 && used >= item.everyKm
         val daysDue = item.everyDays > 0 && days != null && days >= item.everyDays
@@ -256,12 +262,12 @@ object Care {
     }
 
     /** Due jobs first, then the most worn. */
-    fun sorted(items: List<CareItem>, rides: List<RouteMeta>, now: Long, tz: TimeZone = TimeZone.getDefault()): List<Pair<CareItem, CareStatus>> =
-        items.map { it to status(it, rides, now, tz) }
+    fun sorted(items: List<CareItem>, rides: List<RouteMeta>, now: Long, tz: TimeZone = TimeZone.getDefault(), bikes: BikeList? = null): List<Pair<CareItem, CareStatus>> =
+        items.map { it to status(it, rides, now, tz, bikes) }
             .sortedWith(compareByDescending<Pair<CareItem, CareStatus>> { it.second.due }.thenByDescending { it.second.fraction })
 
-    fun dueCount(items: List<CareItem>, rides: List<RouteMeta>, now: Long, tz: TimeZone = TimeZone.getDefault()): Int =
-        items.count { status(it, rides, now, tz).due }
+    fun dueCount(items: List<CareItem>, rides: List<RouteMeta>, now: Long, tz: TimeZone = TimeZone.getDefault(), bikes: BikeList? = null): Int =
+        items.count { status(it, rides, now, tz, bikes).due }
 
     private fun short(t: Long, now: Long, tz: TimeZone, locale: Locale): String {
         val year = Calendar.getInstance(tz).apply { timeInMillis = t }.get(Calendar.YEAR)

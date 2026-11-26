@@ -101,14 +101,25 @@ fun BikeCareScreen(vm: MainVm, initialOpen: String? = null, now: Long = System.c
     val rides = remember(metas) { metas.filter { it.type == RouteType.RECORDED } }
     // null: the list; NEW: the add form; otherwise the id of the job being edited.
     var open by rememberSaveable { mutableStateOf(initialOpen) }
+    // Experimental multiple bikes: the bike whose jobs are shown (only when there is more than one).
+    var manageBikes by rememberSaveable { mutableStateOf(false) }
+    var pickedBike by rememberSaveable { mutableStateOf<String?>(null) }
+    val bikes = vm.bikes
+    val bikeId = if (bikes.multi) bikes.find(pickedBike)?.id ?: bikes.defaultId else null
 
+    if (manageBikes) {
+        BikesScreen(vm) { manageBikes = false }
+        return
+    }
     if (open != null) {
         BackHandler { open = null }
-        CareDetail(vm, if (open == NEW) null else open, rides, now) { open = null }
+        CareDetail(vm, if (open == NEW) null else open, rides, now, bikeId) { open = null }
         return
     }
 
-    val rows = remember(vm.care, rides, now) { Care.sorted(vm.care, rides, now) }
+    val rows = remember(vm.care, rides, now, bikes, bikeId) {
+        Care.sorted(vm.care.filter { bikeId == null || bikes.ownerOf(it.bikeId) == bikeId }, rides, now, bikes = bikes)
+    }
     val due = rows.count { it.second.due }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -118,6 +129,19 @@ fun BikeCareScreen(vm: MainVm, initialOpen: String? = null, now: Long = System.c
                 IconButton({ open = NEW }) { Icon(Icons.Outlined.Add, "Add a job") }
             }
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                if (bikeId != null) {
+                    item {
+                        Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                            BikePicker(bikes, bikeId, { pickedBike = it }, label = "Bike (experimental)")
+                            val t = bikes.totals(bikeId, rides)
+                            Text(
+                                "%,.0f km on the odometer · %d ride%s · %s".format(t.odometerKm, t.rides, if (t.rides == 1) "" else "s", Fmt.dur(t.timeS)),
+                                style = MaterialTheme.typography.bodySmall.tabular, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                    }
+                }
                 item {
                     Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -167,6 +191,23 @@ fun BikeCareScreen(vm: MainVm, initialOpen: String? = null, now: Long = System.c
                     }
                 }
                 if (rows.isNotEmpty()) item { Hairline(Modifier.padding(horizontal = 20.dp)) }
+                item {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { manageBikes = true }.padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(if (bikes.multi) "Bikes" else "Add a bike", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Text(
+                            if (bikes.multi) "${bikes.bikes.size} bikes · Experimental" else "Experimental",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Icon(
+                            Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, Modifier.padding(start = 4.dp).size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Hairline(Modifier.padding(horizontal = 20.dp))
+                }
                 item { Spacer(Modifier.height(24.dp)) }
             }
         }
@@ -180,13 +221,13 @@ private fun dayLong(t: Long) = SimpleDateFormat("EEE d MMM yyyy", Locale.getDefa
 /** Add a job, or open one: edit its numbers, mark it done on any day, read and trim its history. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CareDetail(vm: MainVm, id: String?, rides: List<RouteMeta>, now: Long, onClose: () -> Unit) {
+private fun CareDetail(vm: MainVm, id: String?, rides: List<RouteMeta>, now: Long, newBikeId: String?, onClose: () -> Unit) {
     val item = id?.let { key -> vm.care.firstOrNull { it.id == key } }
     if (id != null && item == null) {
         LaunchedEffect(Unit) { onClose() }
         return
     }
-    val base = remember(id) { item ?: CareItem("", 0, 0) }
+    val base = remember(id) { item ?: CareItem("", 0, 0, bikeId = newBikeId) }
     var name by rememberSaveable(id) { mutableStateOf(base.name) }
     var km by rememberSaveable(id) { mutableStateOf(if (base.everyKm > 0) base.everyKm.toString() else "") }
     var days by rememberSaveable(id) { mutableStateOf(if (base.everyDays > 0) base.everyDays.toString() else "") }
@@ -232,7 +273,7 @@ private fun CareDetail(vm: MainVm, id: String?, rides: List<RouteMeta>, now: Lon
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
                 if (item != null) {
-                    val st = Care.status(item, rides, now)
+                    val st = Care.status(item, rides, now, bikes = vm.bikes)
                     Text(
                         Care.text(item, st, now), style = MaterialTheme.typography.titleMedium.tabular,
                         color = if (st.due) Cy.colors.warn else MaterialTheme.colorScheme.onSurface,

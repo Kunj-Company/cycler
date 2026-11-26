@@ -273,6 +273,30 @@ class RouteStore private constructor(ctx: Context) {
         patch(updated)
     }
 
+    /** Say which bike a ride was on; null clears it (the ride then counts for the home bike). */
+    @Synchronized
+    fun setBike(id: String, bikeId: String?) {
+        awaitLoaded()
+        val meta = _metas.value.firstOrNull { it.id == id } ?: return
+        if (meta.bikeId == bikeId) return
+        val updated = meta.copy(bikeId = bikeId)
+        writeSafely(File(dir, "$id.meta.json"), metaToJson(updated).toString())
+        patch(updated)
+    }
+
+    /** Move every ride tagged with bike [from] to bike [to]; used only after the rider confirmed deleting a bike. Returns how many moved. */
+    @Synchronized
+    fun reassignBike(from: String, to: String): Int {
+        awaitLoaded()
+        val moving = _metas.value.filter { it.bikeId == from }
+        moving.forEach { m ->
+            val updated = m.copy(bikeId = to)
+            writeSafely(File(dir, "${m.id}.meta.json"), metaToJson(updated).toString())
+            patch(updated)
+        }
+        return moving.size
+    }
+
     @Synchronized
     fun delete(id: String) {
         if (!isSafeId(id)) return
@@ -666,6 +690,7 @@ class RouteStore private constructor(ctx: Context) {
         .put("notes", m.notes).put("feeling", m.feeling).put("tags", JSONArray(m.tags))
         .put("avgHr", m.avgHr).put("maxHr", m.maxHr)
         .put("alt", m.alt)
+        .also { o -> m.bikeId?.let { o.put("bikeId", it) } }
         .put("laps", JSONArray().also { a -> m.laps.forEach { a.put(JSONArray().put(it.distanceM).put(it.movingMs).put(it.elapsedMs)) } })
         .put("bests", JSONObject().also { o -> m.bests.forEach { (k, s) -> o.put(k.toString(), s) } })
 
@@ -694,7 +719,10 @@ class RouteStore private constructor(ctx: Context) {
         o.optInt("avgHr", 0), o.optInt("maxHr", 0),
     ).let { m ->
         val alt = o.optString("alt", "")
-        m.copy(alt = if (alt == Altitude.GPS || alt == Altitude.MSL) alt else Altitude.legacy(m.type, m.elapsedS))
+        m.copy(
+            alt = if (alt == Altitude.GPS || alt == Altitude.MSL) alt else Altitude.legacy(m.type, m.elapsedS),
+            bikeId = o.optString("bikeId", "").ifBlank { null },
+        )
     }
 
     companion object {
@@ -815,6 +843,10 @@ class Prefs(ctx: Context) {
     var care: List<CareItem>
         get() = CareItem.parse(sp.getString("care", null))
         set(v) = sp.edit().putString("care", CareItem.encode(v)).apply()
+    /** Experimental: the rider's bikes. Stored like the care list, and backed up in its own file (bikes.json). */
+    var bikes: BikeList
+        get() = BikeList.parse(sp.getString("bikes", null))
+        set(v) = sp.edit().putString("bikes", v.encode()).apply()
     /**
      * The rider's preferences as JSON, for backups. Only keys in [SPEC] are written: no last
      * location (device state) and no care list (it has its own file in the backup).
@@ -902,6 +934,8 @@ data class CareItem(
     val note: String = "",
     val history: List<CareDone> = emptyList(),
     val id: String = java.util.UUID.randomUUID().toString(),
+    /** The bike this job belongs to; null (jobs from before bikes existed) means the home bike. */
+    val bikeId: String? = null,
 ) {
     /** Record the job as done at [at]; only the newest [MAX_HISTORY] entries are kept. */
     fun markDone(at: Long, note: String = ""): CareItem {
@@ -941,6 +975,7 @@ data class CareItem(
                         CareItem(
                             name, o.optInt("everyKm"), o.optLong("resetAt"), o.optInt("everyDays"), o.optString("note"),
                             history, o.optString("id").ifBlank { java.util.UUID.randomUUID().toString() },
+                            o.optString("bikeId", "").ifBlank { null },
                         )
                     }
                 }
@@ -960,6 +995,7 @@ data class CareItem(
                 arr.put(org.json.JSONObject().apply {
                     put("id", c.id); put("name", c.name); put("everyKm", c.everyKm); put("everyDays", c.everyDays)
                     put("resetAt", c.resetAt); put("note", c.note)
+                    c.bikeId?.let { put("bikeId", it) }
                     put("history", org.json.JSONArray().apply {
                         c.history.forEach { h -> put(org.json.JSONObject().put("at", h.at).put("note", h.note)) }
                     })

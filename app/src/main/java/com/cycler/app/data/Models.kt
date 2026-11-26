@@ -50,6 +50,8 @@ data class RouteMeta(
     val maxHr: Int = 0,
     /** What the point heights are measured from: [Altitude.MSL] (sea level) or [Altitude.GPS] (raw, still to convert). */
     val alt: String = Altitude.MSL,
+    /** The bike this ride was on; null for rides from before bikes existed (they count for the home bike). */
+    val bikeId: String? = null,
 ) {
     val difficulty: Difficulty get() = Difficulty.of(distanceM, ascentM)
 }
