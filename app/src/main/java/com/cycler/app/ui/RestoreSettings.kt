@@ -19,5 +19,6 @@ fun MainVm.reloadSettings() {
     weightKg = prefs.weightKg
     autoLapKm = prefs.autoLapKm
     ridePages = prefs.ridePages
+    bikeNewRides = prefs.bikeNewRides
     onboarded = onboarded || prefs.onboarded
 }

@@ -38,7 +38,7 @@ class BackupPrefsTest {
         prefs.autoPause = false; prefs.autoPauseLevel = 2; prefs.offRouteAlert = false; prefs.voice = true
         prefs.voiceEveryKm = 5; prefs.turnCues = false; prefs.weeklyGoalKm = 120; prefs.advancedStats = true
         prefs.weightKg = 72; prefs.autoLapKm = 10; prefs.ridePages = "speed|avg"; prefs.customWorkout = "5,3,60,60,5"
-        prefs.onboarded = true
+        prefs.onboarded = true; prefs.bikeNewRides = "default"
     }
 
     @Test fun roundTripRestoresAllowlistedValues() {
@@ -47,13 +47,13 @@ class BackupPrefsTest {
         ctx.getSharedPreferences("cycler", Context.MODE_PRIVATE).edit().clear().commit()
         val fresh = Prefs(ctx)
         assertEquals("trekking", fresh.profile)
-        assertEquals(17, fresh.importJson(json))
+        assertEquals(18, fresh.importJson(json))
         assertEquals("fastbike", fresh.profile); assertEquals("dark", fresh.mapStyle); assertFalse(fresh.keepScreenOn)
         assertEquals("dark", fresh.themeMode); assertFalse(fresh.autoPause); assertEquals(2, fresh.autoPauseLevel)
         assertFalse(fresh.offRouteAlert); assertTrue(fresh.voice); assertEquals(5, fresh.voiceEveryKm)
         assertFalse(fresh.turnCues); assertEquals(120, fresh.weeklyGoalKm); assertTrue(fresh.advancedStats)
         assertEquals(72, fresh.weightKg); assertEquals(10, fresh.autoLapKm); assertEquals("speed|avg", fresh.ridePages)
-        assertEquals("5,3,60,60,5", fresh.customWorkout); assertTrue(fresh.onboarded)
+        assertEquals("5,3,60,60,5", fresh.customWorkout); assertTrue(fresh.onboarded); assertEquals("default", fresh.bikeNewRides)
     }
 
     @Test fun exportExcludesDeviceStateAndCare() {
@@ -89,7 +89,7 @@ class BackupPrefsTest {
         ctx.getSharedPreferences("cycler", Context.MODE_PRIVATE).edit().clear().commit()
         var text: String? = null
         store.importAll(ByteArrayInputStream(out.toByteArray())) { name, t -> if (name == "prefs.json") text = t }
-        assertEquals(17, Prefs(ctx).importJson(text!!))
+        assertEquals(18, Prefs(ctx).importJson(text!!))
         assertEquals(120, Prefs(ctx).weeklyGoalKm)
     }
 

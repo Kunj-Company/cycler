@@ -195,6 +195,7 @@ class RouteStore private constructor(ctx: Context) {
         stops: Int = 0,
         laps: List<LapMark> = emptyList(),
         alt: String = Altitude.MSL,
+        bikeId: String? = null,
     ): String {
         val id = UUID.randomUUID().toString()
         val meta = RouteMeta(
@@ -204,6 +205,7 @@ class RouteStore private constructor(ctx: Context) {
             if (type == RouteType.RECORDED) Geo.bestEfforts(pts) else emptyMap(), FORMAT,
             laps = laps,
             alt = alt,
+            bikeId = bikeId?.takeIf { isSafeId(it) },
         )
         writeSafely(File(dir, "$id.pts.json"), pointsToJson(pts))
         writeSafely(File(dir, "$id.meta.json"), metaToJson(meta).toString())
@@ -414,6 +416,7 @@ class RouteStore private constructor(ctx: Context) {
 
     // Photos and videos attached to a ride live in media/<ride id>/.
     private val mediaRoot = File(dir.parentFile, "media")
+    private val bikePhotos = File(dir.parentFile, "bikes")
     private val _mediaTick = MutableStateFlow(0)
     /** Changes whenever any ride's media changes, so lists can refresh. */
     val mediaTick: StateFlow<Int> = _mediaTick
@@ -453,6 +456,7 @@ class RouteStore private constructor(ctx: Context) {
             extras.forEach { (name, text) -> add("settings/$name", text.toByteArray()) }
             dir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.forEach { add("routes/${it.name}", it.readBytes()) }
             segDir.listFiles()?.filter { it.isFile && it.name.endsWith(".json") }?.forEach { add("segments/${it.name}", it.readBytes()) }
+            bikePhotos.listFiles()?.filter { it.isFile && BIKE_PHOTO.matches(it.name) }?.forEach { add("bikes/${it.name}", it.readBytes()) }
             mediaRoot.listFiles()?.filter { it.isDirectory }?.forEach { d ->
                 d.listFiles()?.filter { it.isFile }?.forEach { f ->
                     zip.putNextEntry(java.util.zip.ZipEntry("media/${d.name}/${f.name}"))
@@ -496,7 +500,8 @@ class RouteStore private constructor(ctx: Context) {
                 val limit = entryLimit(e.name)
                 val target = File(root, e.name)
                 // Only files that land inside the app's own folder are accepted.
-                if (limit != null && target.canonicalPath.startsWith(base)) {
+                // A bike picture already here is never replaced by one from a backup.
+                if (limit != null && target.canonicalPath.startsWith(base) && !(e.name.startsWith("bikes/") && target.exists())) {
                     target.parentFile?.mkdirs()
                     if (copyLimited(zip, target, limit)) n++
                 }
@@ -552,6 +557,8 @@ class RouteStore private constructor(ctx: Context) {
     class Recording(
         val pts: List<Pt>, val movingMs: Long, val maxSpeedMs: Double, val stops: Int, val elapsedMs: Long,
         val laps: List<LapMark>, val paused: Boolean,
+        /** The bike chosen when the ride started (a `#B` line); null when none was written. */
+        val bikeId: String? = null,
     )
 
     /**
@@ -566,10 +573,12 @@ class RouteStore private constructor(ctx: Context) {
         val pts = ArrayList<Pt>()
         val laps = ArrayList<LapMark>()
         var moving = -1L; var maxSpeed = 0.0; var stops = 0; var elapsed = -1L; var paused = false
+        var bikeId: String? = null
         for (line in lines) {
             val p = line.split(',')
             if (line.startsWith("#")) {
                 when (p[0]) {
+                    "#B" -> p.getOrNull(1)?.trim()?.takeIf { isSafeId(it) }?.let { bikeId = it }
                     "#L" -> {
                         val d = p.getOrNull(1)?.toDoubleOrNull(); val m = p.getOrNull(2)?.toLongOrNull(); val e = p.getOrNull(3)?.toLongOrNull()
                         if (d != null && m != null && e != null) laps.add(LapMark(d, m, e))
@@ -605,7 +614,7 @@ class RouteStore private constructor(ctx: Context) {
             }
             elapsed = moving
         }
-        return Recording(pts, moving, maxSpeed, stops, elapsed, laps, paused)
+        return Recording(pts, moving, maxSpeed, stops, elapsed, laps, paused, bikeId)
     }
 
     private fun dist(a: Pt, b: Pt) = Geo.dist(a, b)
@@ -648,6 +657,8 @@ class RouteStore private constructor(ctx: Context) {
                 ascentM = Geo.ascent(pts, 4.0, smooth = true), createdAt = pts.first().t, elapsedS = elapsed,
                 maxSpeedMs = rec.maxSpeedMs, stops = rec.stops, laps = laps,
                 alt = Altitude.GPS,
+                // The bike chosen at the start, if it still exists; one bike (or no note) leaves it to the home bike.
+                bikeId = rec.bikeId?.let { b -> runCatching { Prefs(appContext).bikes.resolveForRide(b) }.getOrNull() },
             )
             // Only now is it safe to drop the raw recording.
             recordingFile.delete()
@@ -731,10 +742,12 @@ class RouteStore private constructor(ctx: Context) {
         private val SAFE_ID = Regex("[A-Za-z0-9_-]{1,64}")
         private val ROUTE_FILE = Regex("[A-Za-z0-9_-]{1,64}\\.(meta|pts|hr)\\.json")
         private val SEGMENT_FILE = Regex("[A-Za-z0-9_-]{1,64}\\.json")
+        private val BIKE_PHOTO = Regex("[A-Za-z0-9_-]{1,64}\\.jpg")
         private val MEDIA_FILE = Regex("[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}")
         internal const val MAX_SETTINGS_BYTES = 1_000_000L
         internal const val MAX_JSON_BYTES = 50L * 1024 * 1024
         internal const val MAX_MEDIA_BYTES = 1024L * 1024 * 1024
+        internal const val MAX_BIKE_PHOTO_BYTES = 8L * 1024 * 1024
 
         fun isSafeId(id: String?): Boolean = id != null && SAFE_ID.matches(id)
 
@@ -744,6 +757,7 @@ class RouteStore private constructor(ctx: Context) {
             return when (parts.firstOrNull()) {
                 "routes" -> if (parts.size == 2 && ROUTE_FILE.matches(parts[1])) MAX_JSON_BYTES else null
                 "segments" -> if (parts.size == 2 && SEGMENT_FILE.matches(parts[1])) MAX_JSON_BYTES else null
+                "bikes" -> if (parts.size == 2 && BIKE_PHOTO.matches(parts[1])) MAX_BIKE_PHOTO_BYTES else null
                 "media" -> if (parts.size == 3 && isSafeId(parts[1]) && MEDIA_FILE.matches(parts[2])) MAX_MEDIA_BYTES else null
                 else -> null
             }
@@ -843,10 +857,18 @@ class Prefs(ctx: Context) {
     var care: List<CareItem>
         get() = CareItem.parse(sp.getString("care", null))
         set(v) = sp.edit().putString("care", CareItem.encode(v)).apply()
-    /** Experimental: the rider's bikes. Stored like the care list, and backed up in its own file (bikes.json). */
+    /** The bikes. Stored like the care list, and backed up in its own file (bikes.json). */
     var bikes: BikeList
         get() = BikeList.parse(sp.getString("bikes", null))
         set(v) = sp.edit().putString("bikes", v.encode()).apply()
+    /** The bike the last ride was started on (device state, not part of backups). */
+    var lastBikeId: String
+        get() = sp.getString("lastBikeId", "") ?: ""
+        set(v) = sp.edit().putString("lastBikeId", v).apply()
+    /** Which bike the Ride screen offers first: [BikeList.MODE_LAST] (default) or [BikeList.MODE_DEFAULT]. */
+    var bikeNewRides: String
+        get() = if (sp.getString("bikeNewRides", null) == BikeList.MODE_DEFAULT) BikeList.MODE_DEFAULT else BikeList.MODE_LAST
+        set(v) = sp.edit().putString("bikeNewRides", v).apply()
     /**
      * The rider's preferences as JSON, for backups. Only keys in [SPEC] are written: no last
      * location (device state) and no care list (it has its own file in the backup).
@@ -908,6 +930,7 @@ class Prefs(ctx: Context) {
             "weightKg" to Spec('i', 0, 1000), "autoLapKm" to Spec('i', 0, 1000),
             "ridePages" to Spec('s', max = 1000), "customWorkout" to Spec('s', max = 200),
             "onboarded" to Spec('b'),
+            "bikeNewRides" to Spec('s', max = 16, allowed = setOf(BikeList.MODE_LAST, BikeList.MODE_DEFAULT)),
         )
     }
 

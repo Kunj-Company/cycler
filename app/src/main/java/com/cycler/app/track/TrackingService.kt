@@ -102,6 +102,8 @@ class TrackingService : Service(), LocationListener {
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastFix: Location? = null
     private var skipNextSegment = false
+    /** The bike chosen for the ride being recorded; also written to recording.csv so a restart keeps it. */
+    private var rideBike: String? = null
     private var lastNotify = 0L
     private var lastWidgetUpdate = 0L
     private var stillSince = 0L
@@ -217,6 +219,13 @@ class TrackingService : Service(), LocationListener {
             }
         }
         store.recordingFile.delete()
+        // Started from the app: the bike picked there. Started from a widget: the one the rider's setting offers first.
+        rideBike = bikeId ?: runCatching {
+            val p = Prefs(this)
+            p.bikes.takeIf { it.multi }?.preselect(p.bikeNewRides, p.lastBikeId)
+        }.getOrNull()
+        bikeId = null
+        rideBike?.let { record("#B,$it\n") }
         onRouteSeen = false
         lastCued = null
         lastFix = null
@@ -277,6 +286,7 @@ class TrackingService : Service(), LocationListener {
             return
         }
         if (!rec.paused) acquireWakeLock()
+        rideBike = rec.bikeId
         onRouteSeen = false; lastCued = null; lastFix = null; stillSince = 0L; offCount = 0
         loadPrefs()
         // The first point after the restart starts a new segment: the gap is not counted as distance.
@@ -376,6 +386,8 @@ class TrackingService : Service(), LocationListener {
                 stops = s.stops,
                 // Raw GPS heights; the store converts them to heights above sea level.
                 alt = Altitude.GPS,
+                // The chosen bike, or the default one if it was retired or deleted meanwhile; none with a single bike.
+                bikeId = runCatching { Prefs(this).bikes.resolveForRide(rideBike) }.getOrNull(),
                 // Whatever was ridden after the last mark is the final lap.
                 laps = if (s.laps.isEmpty()) emptyList() else if (s.lapDistanceM > 20.0)
                     s.laps + LapMark(s.distanceM, s.movingMs, s.elapsedMs(System.currentTimeMillis())) else s.laps,
@@ -385,6 +397,7 @@ class TrackingService : Service(), LocationListener {
             notice = getString(R.string.rec_save_failed)
         }
         if (id != null || !save || s.points.size < 2) store.recordingFile.delete()
+        rideBike = null
         state.value = TrackState(savedId = id, notice = notice)
         Widgets.updateAll(this)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -632,6 +645,8 @@ class TrackingService : Service(), LocationListener {
 
         /** The interval workout to run during the next ride, chosen before pressing Start. */
         @Volatile var workout: Workout? = null
+        /** The bike chosen for the next ride (null: let the saved ride fall back to the default bike). */
+        @Volatile var bikeId: String? = null
         @Volatile private var guideTurns: List<Turn> = emptyList()
         /** Traffic signals near the followed route; a stop next to one pauses the clock sooner. */
         @Volatile var signals: List<Pt> = emptyList()
