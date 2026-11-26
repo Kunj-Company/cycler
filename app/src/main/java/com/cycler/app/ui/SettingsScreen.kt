@@ -35,6 +35,7 @@ import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Route
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -74,7 +75,7 @@ private fun parentOf(page: String) = when (page) {
 
 private fun titleOf(page: String) = when (page) {
     "appearance" -> "Appearance"
-    "bike" -> "Bike"
+    "bike" -> "Route planning"
     "recording" -> "Recording"
     "alerts" -> "Alerts and voice"
     "goals" -> "Goals and you"
@@ -168,6 +169,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                             val themeLabel = themeModes.firstOrNull { it.first == vm.themeMode }?.second ?: "System"
                             val mapLabel = (MapStyles.all.firstOrNull { it.first == vm.mapStyle }?.second ?: "Standard").substringBefore(" (")
                             val bikeLabel = BRouter.profiles.firstOrNull { it.first == vm.profile }?.second ?: "Hybrid / touring"
+                            val bikesSummary = if (vm.bikes.multi) "${vm.bikes.bikes.size} bikes" else vm.bikes.bikes.first().name
                             val recordingSummary = (if (vm.autoPause) "Auto-pause on" else "Auto-pause off") + " · " +
                                 (if (vm.autoLapKm == 0) "Auto-lap off" else "Auto-lap every ${vm.autoLapKm} km")
                             val alertParts = buildList {
@@ -183,7 +185,8 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                             }
                             HubGroup(
                                 "Riding",
-                                HubItem(Icons.Outlined.DirectionsBike, "Bike", bikeLabel) { page = "bike" },
+                                HubItem(Icons.Outlined.DirectionsBike, "Bikes", bikesSummary) { vm.showBikes = true },
+                                HubItem(Icons.Outlined.Route, "Route planning", bikeLabel) { page = "bike" },
                                 HubItem(Icons.Outlined.Timer, "Recording", recordingSummary) { page = "recording" },
                                 HubItem(
                                     Icons.Outlined.NotificationsActive, "Alerts and voice",
@@ -223,7 +226,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                         "bike" -> {
                             PageNote("Decides which roads and tracks route planning prefers.")
                             BRouter.profiles.forEach { (key, label) ->
-                                CheckRow(label, vm.profile == key) { vm.profile = key; vm.prefs.profile = key }
+                                CheckRow(label, vm.profile == key) { vm.chooseProfile(key) }
                             }
                         }
 

@@ -367,6 +367,7 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        if (recorded) vm.bikes.labelFor(meta.bikeId)?.let { BikeChip(it, Modifier.padding(top = 8.dp)) }
                         Spacer(Modifier.height(14.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Metric("Distance", Fmt.kmShort(meta.distanceM), unit = "km")
@@ -622,7 +623,7 @@ private fun AdvancedStats(vm: MainVm, r: Route) {
     if (recorded && s.hasTimes) {
         val efforts = meta.bests.entries.sortedBy { it.key }.map { "Best ${it.key} km" to Fmt.clock(it.value * 1000) }
         StatGroup("Effort", listOf(
-            "Energy, estimated" to if (vm.weightKg > 0) "${s.kcal(vm.weightKg)} kcal" else "Set your weight in Settings",
+            "Energy, estimated" to if (vm.weightKg > 0) "${s.kcal(vm.bikes.energyWeightKg(vm.weightKg, meta.bikeId))} kcal" else "Set your weight in Settings",
         ) + efforts)
 
         Spacer(Modifier.height(16.dp))

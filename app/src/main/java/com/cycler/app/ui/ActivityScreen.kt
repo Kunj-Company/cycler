@@ -250,6 +250,13 @@ fun ActivityScreen(vm: MainVm, initialPeriod: Period = Period.WEEK, now: Long = 
             }
         }
 
+        if (vm.bikes.multi) {
+            val shares = remember(rides, span, vm.bikes) {
+                vm.bikes.breakdown(rides.filter { it.createdAt >= span.start && it.createdAt < span.end })
+            }
+            if (shares.isNotEmpty()) BikeBreakdown(shares)
+        }
+
         if (rides.isEmpty()) {
             Spacer(Modifier.height(28.dp))
             Text(
