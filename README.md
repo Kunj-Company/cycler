@@ -12,7 +12,8 @@
 <p align="center">
   <b>A personal cycling app for Android.</b><br>
   Record rides with the screen off, plan routes and loops, and look back on every ride.<br>
-  No account, no cloud, no ads. Everything is saved on your phone.
+  No account, no cloud, no ads. Everything is saved on your phone.<br>
+  <a href="https://cycler.kunj.company/">cycler.kunj.company</a>
 </p>
 
 <p align="center">

@@ -518,6 +518,7 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     SimpleLinkRow("Licence") { open("licence") }
     SimpleLinkRow("Open-source notices") { open("notices") }
     AboutLinkRow("Privacy policy", "Full text on GitHub", PRIVACY_POLICY_URL)
+    AboutLinkRow("Website", "cycler.kunj.company", com.cycler.app.data.SupportPrompt.SITE_URL)
     AboutLinkRow("Source code on GitHub", "github.com/Kunj-Company/cycler", REPO_URL)
     if (com.cycler.app.BuildConfig.SUPPORT_PROMPT) {
         AboutLinkRow("Buy me a coffee", "Cycler is free and made by one person", com.cycler.app.data.SupportPrompt.URL)

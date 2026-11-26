@@ -733,7 +733,9 @@ class RouteStore private constructor(ctx: Context) {
 
 /** When to show the quiet "buy me a coffee" card: after a few rides, then at most once every two weeks. */
 object SupportPrompt {
-    const val URL = "https://buymeacoffee.com/abhiramnj"
+    /** The donate section of the project website, which links on to Buy Me a Coffee. */
+    const val SITE_URL = "https://cycler.kunj.company/"
+    const val URL = SITE_URL + "#donate"
     const val MIN_RIDES = 3
     const val EVERY_MS = 14L * 24 * 60 * 60 * 1000
 
