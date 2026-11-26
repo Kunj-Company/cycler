@@ -222,6 +222,13 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** Period, sort, search and tag chosen on the Rides tab; kept while the app is open. */
     var rideFilter by mutableStateOf(com.cycler.app.data.RideFilter())
 
+    /** Experimental: the rider's bikes. One implicit bike until a second is added. */
+    var bikes by mutableStateOf(prefs.bikes)
+    fun saveBikes(list: com.cycler.app.data.BikeList) {
+        bikes = list
+        prefs.bikes = list
+    }
+
     fun saveCare(items: List<CareItem>) {
         care = items
         prefs.care = items
@@ -354,15 +361,17 @@ class MainVm(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             var pendingCare: String? = null
             var pendingPrefs: String? = null
+            var pendingBikes: String? = null
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     app.contentResolver.openInputStream(uri)!!.use {
-                        store.importAll(it) { name, text -> if (name == "care.json") pendingCare = text else if (name == "prefs.json") pendingPrefs = text }
+                        store.importAll(it) { name, text -> if (name == "care.json") pendingCare = text else if (name == "bikes.json") pendingBikes = text else if (name == "prefs.json") pendingPrefs = text }
                     }
                 }
             }
             val n = result.getOrNull()
             val bad = result.exceptionOrNull()
+            pendingBikes?.let { saveBikes(com.cycler.app.data.BikeList.restore(bikes, it)) }
             pendingCare?.let { saveCare(CareItem.parse(it)) }
             pendingPrefs?.let { if (prefs.importJson(it) > 0) reloadSettings() }
             restoring = false

@@ -152,10 +152,11 @@ fun RidesScreen(vm: MainVm) {
     val rides = remember(metas) { metas.filter { it.type == RouteType.RECORDED } }
     val f = vm.rideFilter
     var searchOpen by remember { mutableStateOf(f.query.isNotEmpty()) }
-    val shown = remember(rides, f) { RideFilters.apply(rides, f) }
+    val shown = remember(rides, f, vm.bikes) { RideFilters.apply(rides, f, bikes = vm.bikes) }
     val tags = remember(rides) { RideFilters.tagCounts(rides) }
     var sortMenu by remember { mutableStateOf(false) }
     var tagMenu by remember { mutableStateOf(false) }
+    var bikeMenu by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(loaded, rides.size) { if (loaded) vm.maybeShowSupport(rides.size) }
     LaunchedEffect(searchOpen) { if (searchOpen && f.query.isEmpty()) runCatching { focus.requestFocus() } }
@@ -225,6 +226,23 @@ fun RidesScreen(vm: MainVm) {
                         style = MaterialTheme.typography.bodySmall.tabular, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
+                    if (vm.bikes.multi) {
+                        Box {
+                            MenuLabel(vm.bikes.find(f.bikeId)?.name ?: "Bikes", f.bikeId != null) { bikeMenu = true }
+                            DropdownMenu(bikeMenu, { bikeMenu = false }, containerColor = MaterialTheme.colorScheme.surface) {
+                                DropdownMenuItem(
+                                    text = { Text("All bikes", fontWeight = if (f.bikeId == null) FontWeight.SemiBold else null) },
+                                    onClick = { vm.rideFilter = f.copy(bikeId = null); bikeMenu = false },
+                                )
+                                vm.bikes.bikes.forEach { b ->
+                                    DropdownMenuItem(
+                                        text = { Text(b.name + if (b.retired) " (retired)" else "", fontWeight = if (b.id == f.bikeId) FontWeight.SemiBold else null) },
+                                        onClick = { vm.rideFilter = f.copy(bikeId = b.id); bikeMenu = false },
+                                    )
+                                }
+                            }
+                        }
+                    }
                     if (tags.isNotEmpty()) {
                         Box {
                             MenuLabel(f.tag ?: "Tags", f.tag != null) { tagMenu = true }
@@ -384,9 +402,11 @@ fun EditRideScreen(vm: MainVm, id: String) {
     var feeling by androidx.compose.runtime.saveable.rememberSaveable(id) { mutableStateOf(meta.feeling) }
     var tags by androidx.compose.runtime.saveable.rememberSaveable(id, stateSaver = TagListSaver) { mutableStateOf(meta.tags) }
     var newTag by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var bike by androidx.compose.runtime.saveable.rememberSaveable(id) { mutableStateOf(vm.bikes.ownerOf(meta.bikeId)) }
 
     fun close(save: Boolean) {
         if (save) vm.store.updateDetails(id, name, notes, feeling, tags)
+        if (save && vm.bikes.multi && bike != vm.bikes.ownerOf(meta.bikeId)) vm.store.setBike(id, bike)
         vm.editId = null
         if (isNew) {
             vm.editIsNew = false
@@ -433,6 +453,11 @@ fun EditRideScreen(vm: MainVm, id: String) {
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                 )
+
+                if (vm.bikes.multi) {
+                    Spacer(Modifier.height(22.dp))
+                    BikePicker(vm.bikes, bike, { bike = it }, label = "Bike (experimental)", keep = meta.bikeId)
+                }
 
                 Spacer(Modifier.height(22.dp))
                 SectionLabel("How did it feel?")

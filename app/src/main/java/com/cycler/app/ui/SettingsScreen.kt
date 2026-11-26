@@ -107,7 +107,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
     ) { uri ->
         if (uri != null) scope.launch {
             val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { vm.store.exportAll(it, mapOf("care.json" to com.cycler.app.data.CareItem.encode(vm.care), "prefs.json" to vm.prefs.exportJson())) } }.getOrNull()
+                runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { vm.store.exportAll(it, mapOf("care.json" to com.cycler.app.data.CareItem.encode(vm.care), "bikes.json" to vm.bikes.encode(), "prefs.json" to vm.prefs.exportJson())) } }.getOrNull()
             }
             toast(if (n != null) "Backed up $n rides and routes" else "Couldn't write the backup")
         }

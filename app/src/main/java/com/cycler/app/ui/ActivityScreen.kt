@@ -295,7 +295,7 @@ fun ActivityScreen(vm: MainVm, initialPeriod: Period = Period.WEEK, now: Long = 
         val segCount by androidx.compose.runtime.produceState(0, segTick) {
             value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { vm.store.segments().size }
         }
-        val due = remember(vm.care, rides, now) { Care.dueCount(vm.care, rides, now) }
+        val due = remember(vm.care, rides, now, vm.bikes) { Care.dueCount(vm.care, rides, now, bikes = vm.bikes) }
         Hairline()
         LinkRow("Segments", if (segCount == 0) "None yet" else "$segCount saved") { vm.showSegments = true }
         LinkRow("All rides map", "${rides.size} ride${if (rides.size == 1) "" else "s"}") { vm.showHeatmap = true }

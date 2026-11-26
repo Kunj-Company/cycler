@@ -129,6 +129,8 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
         vm.follow(null)
         vm.workout = null
         // Straight to the post-ride page: title, how it felt, notes, tags, photos.
+        // With several bikes the new ride starts on the current default bike.
+        if (vm.bikes.multi) vm.store.setBike(id, vm.bikes.defaultId)
         vm.editIsNew = true
         vm.editId = id
     }
