@@ -248,7 +248,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
                             TrackingService.send(ctx, TrackingService.ACTION_START)
                         }
                     } else {
-                        RecordingPanel(vm, st, now, onBig = { big = true }, onFinish = { showFinish = true })
+                        RecordingPanel(vm, st, now, onBig = { big = true; vm.stat(com.cycler.app.analytics.Feature.BIG_NUMBERS) }, onFinish = { showFinish = true })
                     }
                 }
             }
@@ -320,7 +320,7 @@ private fun IdlePanel(
     if (!granted) {
         Text("Turn on location", style = MaterialTheme.typography.titleLarge)
         Text(
-            "Cycler uses your location to show where you are and to record rides. It stays on this phone.",
+            "Cycler uses your location to show where you are and to record rides. Your rides stay on this phone.",
             style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 4.dp),
         )

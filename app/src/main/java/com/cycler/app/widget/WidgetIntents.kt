@@ -36,21 +36,33 @@ object WidgetIntents {
     const val RC_STATS_OPEN = 401
     const val RC_FALLBACK = 901
 
-    private fun activityIntent(ctx: Context) =
+    /** The request code of the tap, so the anonymous stats can tell which widget was used. */
+    const val EXTRA_SOURCE = "com.cycler.app.extra.WIDGET_SOURCE"
+
+    private fun activityIntent(ctx: Context, requestCode: Int) =
         Intent(ctx, MainActivity::class.java).setAction(OPEN_ACTION).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            .putExtra(EXTRA_TOKEN, WidgetAuth.token(ctx))
+            .putExtra(EXTRA_TOKEN, WidgetAuth.token(ctx)).putExtra(EXTRA_SOURCE, requestCode)
+
+    /** Which widget a request code belongs to, for the anonymous stats; null for the fallback view. */
+    fun featureOf(requestCode: Int): com.cycler.app.analytics.Feature? = when (requestCode / 100) {
+        1 -> com.cycler.app.analytics.Feature.WIDGET_RIDE
+        2 -> com.cycler.app.analytics.Feature.WIDGET_WEEK
+        3 -> com.cycler.app.analytics.Feature.WIDGET_LAST_RIDE
+        4 -> com.cycler.app.analytics.Feature.WIDGET_STATS
+        else -> null
+    }
 
     fun openTab(ctx: Context, tab: Tab, requestCode: Int): PendingIntent =
-        PendingIntent.getActivity(ctx, requestCode, activityIntent(ctx).putExtra(EXTRA_TAB, tab.name), FLAGS)
+        PendingIntent.getActivity(ctx, requestCode, activityIntent(ctx, requestCode).putExtra(EXTRA_TAB, tab.name), FLAGS)
 
     fun openRide(ctx: Context, rideId: String, requestCode: Int): PendingIntent =
-        PendingIntent.getActivity(ctx, requestCode, activityIntent(ctx).putExtra(EXTRA_RIDE_ID, rideId), FLAGS)
+        PendingIntent.getActivity(ctx, requestCode, activityIntent(ctx, requestCode).putExtra(EXTRA_RIDE_ID, rideId), FLAGS)
 
     /** Start a ride. Goes through the activity: a background service start would not be allowed to use location. */
     fun startRide(ctx: Context, requestCode: Int): PendingIntent =
         PendingIntent.getActivity(
             ctx, requestCode,
-            activityIntent(ctx).putExtra(EXTRA_TAB, Tab.RIDE.name).putExtra(EXTRA_WIDGET_ACTION, WIDGET_ACTION_START),
+            activityIntent(ctx, requestCode).putExtra(EXTRA_TAB, Tab.RIDE.name).putExtra(EXTRA_WIDGET_ACTION, WIDGET_ACTION_START),
             FLAGS,
         )
 

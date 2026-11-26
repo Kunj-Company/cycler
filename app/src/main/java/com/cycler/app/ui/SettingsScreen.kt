@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Flag
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.PrivacyTip
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,7 +70,7 @@ private const val PRIVACY_POLICY_URL = "https://github.com/Kunj-Company/cycler/b
 
 /** Where the back arrow on each page leads. */
 private fun parentOf(page: String) = when (page) {
-    "whatsnew", "licence", "notices", "privacy" -> "about"
+    "whatsnew", "licence", "notices" -> "about"
     else -> HUB
 }
 
@@ -109,6 +111,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
             val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { ctx.contentResolver.openOutputStream(uri)!!.use { vm.store.exportAll(it, mapOf("care.json" to com.cycler.app.data.CareItem.encode(vm.care), "bikes.json" to vm.bikes.encode(), "prefs.json" to vm.prefs.exportJson())) } }.getOrNull()
             }
+            if (n != null) vm.stat(com.cycler.app.analytics.Feature.BACKUP_EXPORT)
             toast(if (n != null) "Backed up $n rides and routes" else "Couldn't write the backup")
         }
     }
@@ -138,7 +141,9 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
     val askHealth = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.health.connect.client.PermissionController.createRequestPermissionResultContract(),
     ) { granted ->
+        val wasOn = healthOn
         healthOn = granted.containsAll(com.cycler.app.health.Health.permissions)
+        if (healthOn && !wasOn) vm.stat(com.cycler.app.analytics.Feature.HEALTH_CONNECT_CONNECT)
         if (healthOn) scope.launch {
             // Fill in weight for the energy estimate if the rider hasn't set one.
             if (vm.weightKg == 0) com.cycler.app.health.Health.latestWeightKg(ctx)?.let { vm.weightKg = it; vm.prefs.weightKg = it }
@@ -146,6 +151,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
         } else toast("Heart rate and weight access wasn't granted")
     }
     val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull().orEmpty() }
+    var statsOn by remember { mutableStateOf(com.cycler.app.analytics.UsageStats.isEnabled(ctx)) }
     var page by rememberSaveable { mutableStateOf(startPage ?: HUB) }
     BackHandler(enabled = page != HUB) { page = parentOf(page) }
 
@@ -200,6 +206,10 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                                 "App and phone",
                                 HubItem(Icons.Outlined.Map, "Maps and data", "Offline maps, backup and restore") { page = "data" },
                                 HubItem(Icons.Outlined.PhoneAndroid, "Phone", "Battery, location and notifications") { page = "phone" },
+                                HubItem(
+                                    Icons.Outlined.PrivacyTip, "Privacy",
+                                    if (statsOn) "Anonymous stats on" else "Anonymous stats off",
+                                ) { page = "privacy" },
                                 HubItem(Icons.Outlined.Info, "About", if (version.isEmpty()) "Cycler" else "Cycler $version") { page = "about" },
                             )
                         }
@@ -352,7 +362,7 @@ fun SettingsScreen(vm: MainVm, startPage: String? = null) {
                         }
 
                         "about" -> AboutPage(version) { page = it }
-                        "privacy" -> PrivacyPage()
+                        "privacy" -> PrivacyPage(statsOn) { statsOn = it; com.cycler.app.analytics.UsageStats.setEnabled(ctx, it) }
                         "whatsnew" -> WhatsNewPage()
                         "licence" -> LicencePage()
                         "notices" -> NoticesPage()
@@ -502,8 +512,8 @@ private fun AboutPage(version: String, open: (String) -> Unit) {
     }
     Text(
         "A cycling app for recording rides with GPS, planning routes and looking back on your rides. " +
-            "Your rides stay on this phone, with no account and no analytics. Weather, route planning, " +
-            "search use online services (see Privacy).",
+            "Your rides stay on this phone, with no account and no ads. Weather, route planning, " +
+            "search and the anonymous stats use online services (see Privacy).",
         style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp),
     )
     Text("Developed by Abhiram N J", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
@@ -542,11 +552,64 @@ internal fun openUrl(ctx: android.content.Context, url: String): Boolean = runCa
     ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }.isSuccess
 
+/** What the anonymous weekly stats contain, as listed on the Privacy page. Matches the stats contract. */
+internal val STATS_SHARED = listOf(
+    "A random ID made on this phone, not linked to you or the phone",
+    "The app version and the week (never the day or time)",
+    "How many days that week the app was opened",
+    "Rides started, saved and discarded, and the total distance",
+    "How often features were used, such as export, share or route planning",
+    "The area, about 10 km across, where saved rides started and ended, sent separately without the ID",
+)
+
 @Composable
-private fun PrivacyPage() {
+private fun PrivacyPage(statsOn: Boolean, onStats: (Boolean) -> Unit) {
+    val ctx = LocalContext.current
     PageNote("What stays on this phone, and what goes online.")
+    ToggleRow(
+        "Share anonymous stats", "Helps improve Cycler. No names, routes or exact places.",
+        statsOn, onStats,
+    )
+    val id = remember { com.cycler.app.analytics.UsageStats.installId(ctx) }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
+            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("Cycler stats ID", id))
+            if (android.os.Build.VERSION.SDK_INT < 33) {
+                android.widget.Toast.makeText(ctx, "Stats ID copied", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }.padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Your stats ID", style = MaterialTheme.typography.bodyLarge)
+            Text(id, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.Outlined.ContentCopy, "Copy stats ID", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Text(
+        "To delete your stats, email hellokunjcompany@gmail.com with this ID.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+    )
+    Hairline()
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+        Text("What is shared", style = MaterialTheme.typography.bodyLarge)
+        STATS_SHARED.forEach {
+            Row(Modifier.padding(top = 4.dp)) {
+                Text("•", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(16.dp))
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            }
+        }
+        Text(
+            "Never shared: names, routes, exact places, search text, speed, heart rate, anything from Health Connect, " +
+                "photos, notes, or your phone's model and IDs. The stats server does not keep your IP address.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp),
+        )
+    }
+    Hairline()
     val sections = listOf(
-        "On this phone" to "Your rides, photos and settings are stored only on this phone. There is no account, no analytics, no ads and no tracking. Nothing leaves the phone except the requests listed below.",
+        "On this phone" to "Your rides, photos and settings are stored only on this phone. There is no account and no ads. Nothing leaves the phone except the requests listed below.",
         "Backup" to "A backup is a zip file you save yourself. It holds your rides, routes, photos and settings. Photos keep their original metadata, including where they were taken. Android cloud backup is turned off.",
         "Health Connect" to "If you connect it, Cycler reads heart rate and weight, to show on ride pages and estimate energy. It never writes to Health Connect and never shares what it reads.",
         "Weather" to "Whenever the app knows your position, that position rounded to about 100 m (3 decimals) is sent to Open-Meteo to get the weather, at most every 15 minutes.",
@@ -554,6 +617,7 @@ private fun PrivacyPage() {
         "Place search" to "What you type in search is sent to Photon, with your position rounded to about 1 km (2 decimals) to put nearby places first.",
         "Traffic signals" to "When you open a ride or route, or follow one, a box around it (its bounding box) is sent to the Overpass API to find traffic signals.",
         "Maps" to "Map tiles come from OpenFreeMap or CyclOSM, so they see the area you are looking at, including maps you save for offline use.",
+        "Anonymous stats" to "If Share anonymous stats is on, once a week is over the app sends that week's counts (listed above) to Cycler's stats server, at most once a day and only on a network. The area report is sent separately, with no ID, so it can't be tied to the rest. Turning it off deletes what hasn't been sent yet.",
         "Privacy policy" to "The full policy is at $PRIVACY_POLICY_URL.",
         "Contact" to "Kunj Company, hellokunjcompany@gmail.com",
     )

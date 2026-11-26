@@ -1,0 +1,11 @@
+# systemd timer (Linux): daily, catches up after the laptop was off/asleep.
+[Unit]
+Description=Daily Cycler stats pull
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

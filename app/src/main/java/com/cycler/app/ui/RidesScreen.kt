@@ -540,7 +540,7 @@ private fun SupportCard(onClose: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text("Enjoying Cycler?", style = MaterialTheme.typography.titleSmall)
             Text(
-                "It is free, with no ads or tracking, and made by one person. If it helps your rides, you can buy me a coffee.",
+                "It is free, with no ads and no account, and made by one person. If it helps your rides, you can buy me a coffee.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
             )

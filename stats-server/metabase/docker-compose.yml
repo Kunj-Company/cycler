@@ -1,0 +1,43 @@
+# Metabase for Cycler stats, on the spare laptop.
+#
+#   cd stats-server/metabase
+#   docker compose up -d        # start (restarts automatically after reboot while Docker runs)
+#   ./setup.sh                  # first time only: admin user + "Cycler stats" database
+#   docker compose down         # stop (data is kept in the metabase-app volume)
+#
+# Metabase reads ../exporter/data/stats.db (built daily by exporter/pull.sh) through its
+# built-in SQLite driver. The folder is mounted read-only. The exporter swaps the data
+# inside stats.db in one SQLite transaction, so Metabase sees new data without a restart.
+
+name: cycler-stats
+
+services:
+  metabase:
+    image: metabase/metabase:v0.64.9.1   # pinned (0.64 LTS line). Bump deliberately.
+    container_name: cycler-metabase
+    restart: unless-stopped
+    ports:
+      # Default: reachable from the home network at http://<laptop>:3000.
+      # Set METABASE_BIND=127.0.0.1 (e.g. in metabase/.env) to allow only the laptop itself.
+      # Do not port-forward this on your router.
+      # Set METABASE_PORT (e.g. 3030) if port 3000 is already taken on the laptop.
+      - "${METABASE_BIND:-0.0.0.0}:${METABASE_PORT:-3000}:3000"
+    environment:
+      MB_DB_TYPE: h2
+      MB_DB_FILE: /metabase-app/metabase.db   # Metabase's own settings, users and saved questions
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      MB_SITE_NAME: "Cycler stats"
+      JAVA_TIMEZONE: UTC
+    volumes:
+      - metabase-app:/metabase-app
+      - ../exporter/data:/cycler:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
+
+volumes:
+  metabase-app:

@@ -651,6 +651,10 @@ class RouteStore private constructor(ctx: Context) {
             )
             // Only now is it safe to drop the raw recording.
             recordingFile.delete()
+            com.cycler.app.analytics.UsageStats.rideFinished(
+                appContext, distance, pts.first().lat, pts.first().lon, pts.last().lat, pts.last().lon,
+            )
+            com.cycler.app.analytics.UsageStats.track(appContext, com.cycler.app.analytics.Feature.RIDE_RECOVERED)
             return Recovery.Saved(id, pts.last().t)
         } catch (e: Exception) {
             // Keep recording.csv: the next launch tries again.

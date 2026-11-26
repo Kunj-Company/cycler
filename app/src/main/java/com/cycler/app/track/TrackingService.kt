@@ -28,6 +28,8 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.cycler.app.MainActivity
 import com.cycler.app.R
+import com.cycler.app.analytics.Feature
+import com.cycler.app.analytics.UsageStats
 import java.io.File
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Altitude
@@ -161,6 +163,7 @@ class TrackingService : Service(), LocationListener {
             Locale.US, "Lap %d: %.2f km in %d:%02d", n, s.lapDistanceM / 1000, s.lapMovingMs / 60000, s.lapMovingMs / 1000 % 60,
         )
         state.update { it.copy(laps = it.laps + mark, notice = text) }
+        if (!auto) UsageStats.track(this, Feature.LAP)
         record(String.format(Locale.US, "#L,%.1f,%d,%d\n", mark.distanceM, mark.movingMs, mark.elapsedMs))
         buzz(longArrayOf(0, 120))
         if (auto && ttsReady) runCatching { tts?.speak("Lap $n", TextToSpeech.QUEUE_ADD, null, "lap") }
@@ -184,7 +187,10 @@ class TrackingService : Service(), LocationListener {
             // The other actions only make sense while a ride is running.
             else -> if (state.value.status == TrackStatus.IDLE) stopSelf() else when (intent.action) {
                 ACTION_LAP -> markLap(auto = false)
-                ACTION_PAUSE -> pause()
+                ACTION_PAUSE -> {
+                    if (state.value.status == TrackStatus.RECORDING) UsageStats.track(this, Feature.PAUSE)
+                    pause()
+                }
                 ACTION_RESUME -> resume()
                 ACTION_STOP -> finish(intent.getStringExtra(EXTRA_NAME), save = true)
                 ACTION_DISCARD -> finish(null, save = false)
@@ -242,6 +248,8 @@ class TrackingService : Service(), LocationListener {
         if (workout != null) ticker.postDelayed(tick, 1000)
         lastWidgetUpdate = System.currentTimeMillis()
         Widgets.updateAll(this)
+        UsageStats.rideStarted(this)
+        if (workout != null) UsageStats.track(this, Feature.WORKOUT)
     }
 
     private fun loadPrefs() {
@@ -292,6 +300,7 @@ class TrackingService : Service(), LocationListener {
             gpsOff = !runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(true),
             notice = getString(R.string.rec_continued_after_kill),
         )
+        UsageStats.track(this, Feature.RIDE_RECOVERED)
         lastWidgetUpdate = now
         Widgets.updateAll(this)
     }
@@ -385,6 +394,13 @@ class TrackingService : Service(), LocationListener {
             notice = getString(R.string.rec_save_failed)
         }
         if (id != null || !save || s.points.size < 2) store.recordingFile.delete()
+        // Anonymous stats: a saved ride counts as finished (distance and ~11 km start/end cells only);
+        // a discarded or too-short one as discarded. A failed save is counted when it is recovered.
+        if (id != null) {
+            val a = s.points.first()
+            val b = s.points.last()
+            UsageStats.rideFinished(this, s.distanceM, a.lat, a.lon, b.lat, b.lon)
+        } else if (!save || s.points.size < 2) UsageStats.rideDiscarded(this)
         state.value = TrackState(savedId = id, notice = notice)
         Widgets.updateAll(this)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)

@@ -1,0 +1,5 @@
+# Linux (or macOS) cron: run the exporter every day at 04:15 local time.
+# Edit with `crontab -e` and replace /home/me/cycler with where you cloned the repo.
+# Note: cron skips runs while the laptop is asleep or off; systemd (Persistent=true) and
+# launchd catch up after wake.
+15 4 * * * /home/me/cycler/stats-server/exporter/pull.sh >> /home/me/cycler/stats-server/exporter/pull.log 2>&1

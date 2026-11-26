@@ -33,8 +33,11 @@ object WidgetLaunch {
         i.removeExtra(WidgetIntents.EXTRA_TAB)
         i.removeExtra(WidgetIntents.EXTRA_RIDE_ID)
         i.removeExtra(WidgetIntents.EXTRA_TOKEN)
+        val source = i.getIntExtra(WidgetIntents.EXTRA_SOURCE, 0)
+        i.removeExtra(WidgetIntents.EXTRA_SOURCE)
         // Anything exported can be sent these extras; without the install's secret it is not a widget tap.
         if (!authentic) return false
+        WidgetIntents.featureOf(source)?.let { com.cycler.app.analytics.UsageStats.track(ctx, it) }
 
         // Close whatever full-screen page is open so the tab or ride is what the rider sees.
         vm.showSettings = false

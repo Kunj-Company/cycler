@@ -116,6 +116,7 @@ fun OfflineScreen(vm: MainVm, myLoc: Pt?) {
         val meta = JSONObject().put("name", label).toString().toByteArray()
         val app = ctx.applicationContext
         fun create() {
+            com.cycler.app.analytics.UsageStats.track(app, com.cycler.app.analytics.Feature.OFFLINE_MAP_DOWNLOAD)
             OfflineDownload.progress = 0f
             OfflineDownload.message = null
             runCatching {

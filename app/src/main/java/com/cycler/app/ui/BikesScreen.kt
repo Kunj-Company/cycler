@@ -148,6 +148,7 @@ private fun BikeForm(vm: MainVm, id: String?, onClose: () -> Unit) {
     fun save() {
         if (!valid) return
         vm.saveBikes(if (bike == null) list.add(name, type, notes, startKm) else list.update(bike.id, name, type, notes, startKm))
+        if (bike == null) vm.stat(com.cycler.app.analytics.Feature.BIKE_ADDED)
     }
     fun close() { if (bike != null) save(); onClose() }
     BackHandler { close() }

@@ -254,6 +254,7 @@ private fun CareDetail(vm: MainVm, id: String?, rides: List<RouteMeta>, now: Lon
         if (item == null) { lastDone = at; return }
         val current = if (valid) item.copy(name = name.trim(), everyKm = kmN, everyDays = daysN, note = note.trim()) else item
         replace(current.markDone(at, doneNote))
+        vm.stat(com.cycler.app.analytics.Feature.BIKE_CARE)
         doneNote = ""
         message = "Marked as done · " + Care.dateText(at, now)
     }
@@ -407,6 +408,7 @@ private fun CareDetail(vm: MainVm, id: String?, rides: List<RouteMeta>, now: Lon
                         var created = draft()
                         lastDone?.let { created = created.markDone(it) }
                         vm.saveCare(vm.care + created)
+                        vm.stat(com.cycler.app.analytics.Feature.BIKE_CARE)
                         onClose()
                     }, Modifier.fillMaxWidth(), enabled = valid, height = 52.dp)
                 }

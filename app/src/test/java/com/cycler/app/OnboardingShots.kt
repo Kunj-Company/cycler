@@ -49,7 +49,8 @@ class OnboardingShots {
     @Test fun location_granted() = shot("onb_2b_location_granted", 1, granted = true)
     @Test fun background() = shot("onb_3_background", 2)
     @Test fun riding() = shot("onb_4_riding", 3)
-    @Test fun ready() = shot("onb_5_ready", 4)
+    @Test fun stats_notice() = shot("onb_5_stats", 4)
+    @Test fun ready() = shot("onb_6_ready", 5)
     @Test fun welcome_dark() = shot("onb_1_welcome_dark", 0, dark = true)
     @Test fun riding_dark() = shot("onb_4_riding_dark", 3, dark = true)
 
