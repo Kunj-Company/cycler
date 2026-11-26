@@ -357,6 +357,12 @@ private fun IdlePanel(
             modifier = Modifier.padding(top = 10.dp),
         )
     }
+    vm.weather?.rainWarning?.let { warning ->
+        Text(
+            warning, style = MaterialTheme.typography.bodySmall, color = Cy.colors.warn,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
     // An optional interval workout for this ride.
     var pickWorkout by remember { mutableStateOf(false) }
     Row(

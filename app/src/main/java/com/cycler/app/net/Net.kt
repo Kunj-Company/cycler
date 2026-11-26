@@ -90,6 +90,9 @@ object Photon {
 
 /** Current weather by Open-Meteo (https://open-meteo.com) — free, no key. */
 object Weather {
+    /** Show the rain warning from this chance of rain upwards. */
+    const val RAIN_WARN_PERCENT = 50
+
     class Now(
         val tempC: Double,
         val windKmh: Double,
@@ -113,6 +116,12 @@ object Weather {
             }
             return "$kind ${windKmh.toInt()} km/h"
         }
+
+        /** A heads-up for the Ride screen when rain is likely in the next three hours; null otherwise. */
+        val rainWarning: String?
+            get() = if (rainChance >= RAIN_WARN_PERCENT) {
+                "Rain likely: $rainChance% chance in the next 3 hours. Take a rain jacket."
+            } else null
 
         val windFrom: String
             get() = listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")[(((windFromDeg % 360 + 360) % 360 + 22.5) / 45).toInt() % 8]
