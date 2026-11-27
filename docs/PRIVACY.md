@@ -14,7 +14,7 @@ Kunj Company, contact: hellokunjcompany@gmail.com
 - There is no account and there are no ads.
 - Your rides, photos and settings stay on your phone.
 - Cycler sends anonymous usage stats once a week: counts, kilometre totals and rough
-  areas of about 11 km. It is on by default, you are told on first launch, and you can turn
+  areas of about 10 km. It is on by default, you are told on first launch, and you can turn
   it off in Settings → Privacy.
 - Nothing else leaves the phone except the online requests listed below.
 - A backup is a file you save yourself.
@@ -51,7 +51,7 @@ list of what is sent, with examples, is in [ANALYTICS.md](ANALYTICS.md).
 - **Weekly report:** a random stats ID made on your phone, the app version, the week (for
   example 2026-W48), on how many days the app was opened, how many rides were started,
   saved and discarded, the total kilometres, and how often each feature was used.
-- **Area report:** for weeks with a saved ride, the squares of about 11 km (latitude and
+- **Area report:** for weeks with a saved ride, the squares of about 10 km (latitude and
   longitude rounded down to 0.1°) where rides started and ended, with ride counts and
   kilometres. It has no stats ID and is sent separately, so it cannot be tied to the weekly
   report.
@@ -86,7 +86,7 @@ sent, it is easy to turn off, and you can ask us to delete what was sent.
 
 Cycler uses your precise location to show you on the map and record rides. Recording can
 continue with the screen off and shows a notification while it runs. Location is not sent
-anywhere except as described above. Usage stats only include rough areas of about 11 km
+anywhere except as described above. Usage stats only include rough areas of about 10 km
 where saved rides started and ended, never exact positions or routes.
 
 ## Health Connect

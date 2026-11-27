@@ -105,7 +105,7 @@ The last three are counted by the app when something goes wrong, not by somethin
 ## The area report
 
 One per week, only if you saved at least one ride that week. It says roughly where rides
-started and ended, as squares of about 11 km.
+started and ended, as squares of about 10 km.
 
 ```json
 {

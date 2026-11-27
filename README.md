@@ -125,11 +125,11 @@ account and there are no ads. Only these requests leave the phone:
 | Route planning | BRouter (brouter.de) | When you plan a route or loop, or ask for suggestions | The waypoints (6 decimals); for a loop, your current position is the start |
 | Place search | Photon (photon.komoot.io) | When you search | The text you type, and your position rounded to about 1 km (2 decimals) |
 | Traffic signals | Overpass API | When you open or follow a ride or route | A bounding box around the route |
-| Usage stats | Cycler's stats server (Cloudflare) | Daily check; each finished week is sent once, if stats are on | Counts, km totals and ~11 km start/end areas; see below |
+| Usage stats | Cycler's stats server (Cloudflare) | Daily check; each finished week is sent once, if stats are on | Counts, km totals and about 10 km start/end areas; see below |
 
 **Anonymous usage stats** are on by default, with a one-time notice on first launch. Once a
 week Cycler sends counts (days the app was opened, rides, kilometres, features used) under a
-random stats ID, and separately, with no ID, the ~11 km squares where saved rides started and
+random stats ID, and separately, with no ID, the squares of about 10 km where saved rides started and
 ended. No routes, exact positions, search text, ride details or device IDs. The server does
 not store your IP address. Turn it off in **Settings → Privacy**; to delete what was sent,
 email the stats ID shown there to hellokunjcompany@gmail.com. Every field is listed in
