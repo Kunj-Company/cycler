@@ -121,6 +121,7 @@ internal fun BikeForm(vm: MainVm, id: String?, onClose: (String?) -> Unit) {
         val before = vm.bikes
         val after = before.add(draft())
         vm.saveBikes(after)
+        vm.stat(com.cycler.app.analytics.Feature.BIKE_ADDED)
         val copyFrom = before.bikes.filter { b -> vm.care.any { before.ownerOf(it.bikeId) == b.id } }.getOrNull(careChoice - 2)
         when {
             careChoice == 1 -> vm.saveCare(vm.care + BikeList.standardJobs(bikeId))

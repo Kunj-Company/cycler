@@ -24,6 +24,9 @@ android {
         versionName = "0.1.12"
         // Show the "buy me a coffee" card and About link. Build without it with -PsupportPrompt=false.
         buildConfigField("boolean", "SUPPORT_PROMPT", (project.findProperty("supportPrompt") ?: "true").toString())
+        // Anonymous weekly stats (see analytics/). Build with -PstatsUrl= (empty) to leave sending out entirely.
+        val statsUrl = (project.findProperty("statsUrl") ?: "https://cycler-stats.hi-480.workers.dev").toString().trimEnd('/')
+        buildConfigField("String", "STATS_URL", "\"" + statsUrl.replace("\"", "") + "\"")
         // Only the 64-bit ARM build of the map engine (real phones, Apple-silicon emulators).
         // Remove this line if you need other CPU types.
         ndk { abiFilters += "arm64-v8a" }
@@ -70,6 +73,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // Sends the anonymous weekly stats once a day, only with a network connection.
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
     // Maps: MapLibre + free OpenStreetMap-based tiles (no API key)
     implementation("org.maplibre.gl:android-sdk-opengl:13.7.1")
     // Health Connect: heart rate and weight written by Samsung Health and other apps

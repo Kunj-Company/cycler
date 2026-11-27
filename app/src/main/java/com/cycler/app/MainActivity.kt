@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -59,6 +60,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.cycler.app.analytics.Feature
+import com.cycler.app.analytics.StatsWork
+import com.cycler.app.analytics.UsageStats
 import com.cycler.app.data.CareItem
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Prefs
@@ -208,6 +212,19 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** False until the first-launch setup is done; riders who already have rides never see it. */
     var onboarded by mutableStateOf(prefs.onboarded || store.metas.value.isNotEmpty())
     var showCare by mutableStateOf(false)
+    /** The one-time anonymous stats notice, for riders who were already set up before it existed. */
+    var statsNotice by mutableStateOf(!UsageStats.noticeSeen(app))
+
+    /** Count [f] in the anonymous weekly stats. */
+    fun stat(f: Feature) = UsageStats.track(getApplication(), f)
+
+    /** The rider tapped Continue on the stats notice. */
+    fun acceptStatsNotice() {
+        val app = getApplication<Application>()
+        UsageStats.setNoticeSeen(app)
+        UsageStats.markActive(app)
+        statsNotice = false
+    }
     /** The support card on the Rides tab. Decided once per app start, so it never pops up mid-session. */
     var supportCard by mutableStateOf(false)
     private var supportChecked = false
@@ -435,6 +452,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             }
             val n = result.getOrNull()
             val bad = result.exceptionOrNull()
+            if (n != null && n > 0) stat(Feature.BACKUP_IMPORT)
             pendingBikes?.let {
                 saveBikes(com.cycler.app.data.BikeList.restore(bikes, it))
                 // Pictures of bikes that did not make it into the list are not kept.
@@ -466,6 +484,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     fun findRoutes(points: List<Pt>) {
         if (points.size < 2 || busy) return
         retryPlan = { findRoutes(points) }
+        stat(Feature.PLAN_A_TO_B)
         busy = true
         error = null
         viewModelScope.launch {
@@ -475,6 +494,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             val ok = results.mapNotNull { it.getOrNull() }
                 .distinctBy { "${it.distanceM.toInt() / 50}-${it.ascentM.toInt() / 5}" }
             if (ok.isEmpty()) {
+                stat(Feature.ROUTING_FAILED)
                 error = com.cycler.app.ui.RouteErrors.message(results.firstNotNullOfOrNull { it.exceptionOrNull() })
                 options = emptyList()
             } else {
@@ -491,6 +511,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     fun findLoops(start: Pt) {
         if (busy) return
         retryPlan = { findLoops(start) }
+        stat(Feature.PLAN_LOOP)
         busy = true
         error = null
         val target = loopKm * 1000.0
@@ -504,6 +525,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             }
             val ok = results.mapNotNull { it.getOrNull() }
             if (ok.isEmpty()) {
+                stat(Feature.ROUTING_FAILED)
                 error = com.cycler.app.ui.RouteErrors.message(results.firstNotNullOfOrNull { it.exceptionOrNull() })
                 options = emptyList()
             } else {
@@ -520,6 +542,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     fun suggestNearby(from: Pt) {
         if (suggestBusy) return
         retrySuggest = { suggestNearby(from) }
+        stat(Feature.ROUTE_SUGGEST)
         suggestBusy = true
         suggestError = null
         val prof = profile
@@ -541,6 +564,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             val ok = results.mapNotNull { it.getOrNull() }.sortedBy { it.distanceM }
             suggestions = ok
             if (ok.isEmpty()) {
+                stat(Feature.ROUTING_FAILED)
                 suggestError = com.cycler.app.ui.RouteErrors.message(results.firstNotNullOfOrNull { it.exceptionOrNull() })
             }
             suggestBusy = false
@@ -613,6 +637,7 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             val id = withContext(Dispatchers.IO) {
                 store.save(name, RouteType.PLANNED, o.pts, o.timeS, o.distanceM, o.ascentM)
             }
+            stat(Feature.ROUTE_SAVED)
             clearPlan()
             detailId = id
         }
@@ -655,6 +680,13 @@ class MainActivity : ComponentActivity() {
             handleWidgetIntent(intent)
         }
         handlePrivacyIntent(intent, savedInstanceState)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Anonymous stats: a day the app was used, and make sure the daily send is scheduled.
+        UsageStats.markActive(this)
+        StatsWork.schedule(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -776,6 +808,12 @@ fun App(vm: MainVm) {
 
     if (!vm.onboarded) {
         Onboarding(vm, granted, request) { vm.onboarded = true; vm.prefs.onboarded = true }
+        return
+    }
+    // Once, for riders set up before anonymous stats existed. Never over a ride being recorded.
+    val trackStatus by TrackingService.state.collectAsState()
+    if (vm.statsNotice && trackStatus.status == TrackStatus.IDLE) {
+        com.cycler.app.ui.StatsNoticeScreen { vm.acceptStatsNotice() }
         return
     }
     val share = vm.shareId

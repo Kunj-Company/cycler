@@ -12,7 +12,7 @@
 <p align="center">
   <b>A personal cycling app for Android.</b><br>
   Record rides with the screen off, plan routes and loops, and look back on every ride.<br>
-  No account, no cloud, no ads. Everything is saved on your phone.<br>
+  No account, no ads. Your rides stay on your phone.<br>
   <a href="https://cycler.kunj.company/">cycler.kunj.company</a>
 </p>
 
@@ -116,7 +116,7 @@ Keep a backup now and then: **Settings → Maps and data → Back up everything*
 ## Privacy
 
 Rides, photos and settings stay in the app's own storage on your phone. There is no
-account, no analytics, no ads and no tracking. Only these requests leave the phone:
+account and there are no ads. Only these requests leave the phone:
 
 | What | Sent to | When | What is sent |
 |---|---|---|---|
@@ -125,8 +125,17 @@ account, no analytics, no ads and no tracking. Only these requests leave the pho
 | Route planning | BRouter (brouter.de) | When you plan a route or loop, or ask for suggestions | The waypoints (6 decimals); for a loop, your current position is the start |
 | Place search | Photon (photon.komoot.io) | When you search | The text you type, and your position rounded to about 1 km (2 decimals) |
 | Traffic signals | Overpass API | When you open or follow a ride or route | A bounding box around the route |
+| Usage stats | Cycler's stats server (Cloudflare) | Daily check; each finished week is sent once, if stats are on | Counts, km totals and about 10 km start/end areas; see below |
 
-These are free community servers with no API keys. Maps, planning and weather need
+**Anonymous usage stats** are on by default, with a one-time notice on first launch. Once a
+week Cycler sends counts (days the app was opened, rides, kilometres, features used) under a
+random stats ID, and separately, with no ID, the squares of about 10 km where saved rides started and
+ended. No routes, exact positions, search text, ride details or device IDs. The server does
+not store your IP address. Turn it off in **Settings → Privacy**; to delete what was sent,
+email the stats ID shown there to hellokunjcompany@gmail.com. Every field is listed in
+[docs/ANALYTICS.md](docs/ANALYTICS.md).
+
+Apart from the stats server, these are free community servers with no API keys. Maps, planning and weather need
 internet; recording does not. A backup is a zip file you save yourself. Photos in it keep
 their original metadata, including where they were taken. Android cloud backup is off.
 The same list is in the app under **About → Privacy**; the full policy is in
@@ -150,6 +159,13 @@ Helpers in [`scripts/`](scripts):
 | `run-emulator.sh` | Starts the `cycler_api35` emulator and waits for it to boot |
 | `install-debug.sh` | Builds, installs and opens the debug APK with location granted |
 | `gps-ride.sh [min] [km/h]` | Feeds the emulator a moving GPS track, so a ride can be recorded |
+
+### Stats server
+
+The server that receives usage stats is a Cloudflare Worker with a D1 database, in
+[`stats-server/`](stats-server). Setup and deploy steps are in
+[`stats-server/README.md`](stats-server/README.md). Builds point at it through the Gradle
+property `statsUrl`; leave it empty to build without stats.
 
 ### Tests and screenshots without a phone
 

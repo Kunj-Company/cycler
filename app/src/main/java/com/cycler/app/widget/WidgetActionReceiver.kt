@@ -15,7 +15,9 @@ class WidgetActionReceiver : BroadcastReceiver() {
         runCatching {
             when (intent.action) {
                 TrackingService.ACTION_PAUSE, TrackingService.ACTION_RESUME, TrackingService.ACTION_LAP -> {
-                    forward(context, intent.action!!)
+                    if (forward(context, intent.action!!)) {
+                        com.cycler.app.analytics.UsageStats.track(context, com.cycler.app.analytics.Feature.WIDGET_RIDE)
+                    }
                     // Fixes a widget that was left showing a ride that has since ended.
                     Widgets.updateAll(context)
                 }

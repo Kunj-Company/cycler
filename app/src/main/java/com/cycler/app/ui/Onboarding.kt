@@ -30,6 +30,7 @@ import androidx.compose.material.icons.automirrored.outlined.DirectionsBike
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PhotoLibrary
@@ -56,7 +57,8 @@ import androidx.compose.ui.unit.dp
 import com.cycler.app.MainVm
 import com.cycler.app.net.BRouter
 
-private const val LAST_STEP = 4
+private const val STATS_STEP = 4
+private const val LAST_STEP = 5
 private const val GOAL_STEP_KM = 10
 private const val GOAL_MIN_KM = 10
 private const val GOAL_MAX_KM = 500
@@ -65,8 +67,8 @@ private const val GOAL_MAX_KM = 500
 private val SECONDARY_SLOT = 56.dp
 
 /**
- * First-launch setup: five short steps, one at a time. Nothing here is required;
- * every step can be skipped and everything chosen can be changed later in Settings.
+ * First-launch setup: six short steps, one at a time. Nothing here is required, but Skip still stops
+ * at the anonymous stats notice, which is shown once to everyone; everything chosen can be changed later in Settings.
  */
 @Composable
 fun Onboarding(vm: MainVm, granted: Boolean, requestPermission: () -> Unit, startStep: Int = 0, onDone: () -> Unit) {
@@ -78,7 +80,7 @@ fun Onboarding(vm: MainVm, granted: Boolean, requestPermission: () -> Unit, star
             TopRow(
                 step = step,
                 onBack = { if (step > 0) step-- },
-                onSkip = { step = LAST_STEP },
+                onSkip = { step = if (vm.statsNotice) STATS_STEP else LAST_STEP },
             )
             Column(
                 Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
@@ -89,6 +91,7 @@ fun Onboarding(vm: MainVm, granted: Boolean, requestPermission: () -> Unit, star
                     1 -> LocationStep(granted)
                     2 -> BackgroundStep()
                     3 -> RidingStep(vm)
+                    STATS_STEP -> StatsNoticeContent()
                     else -> ReadyStep()
                 }
             }
@@ -123,7 +126,12 @@ fun Onboarding(vm: MainVm, granted: Boolean, requestPermission: () -> Unit, star
                         )
                     }
                     3 -> {
-                        CyButton("Continue", { step = 4 }, Modifier.fillMaxWidth())
+                        CyButton("Continue", { step = STATS_STEP }, Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(SECONDARY_SLOT))
+                    }
+                    STATS_STEP -> {
+                        // Only this button counts as accepting the notice; Back or leaving the app does not.
+                        CyButton("Continue", { vm.acceptStatsNotice(); step = LAST_STEP }, Modifier.fillMaxWidth())
                         Spacer(Modifier.height(SECONDARY_SLOT))
                     }
                     else -> {
@@ -160,7 +168,8 @@ private fun TopRow(step: Int, onBack: () -> Unit, onSkip: () -> Unit) {
         }
         StepDots(step)
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
-            if (step < LAST_STEP) {
+            // Nothing to skip from the stats notice on: Continue is the only way past it.
+            if (step < STATS_STEP) {
                 Box(
                     Modifier.heightIn(min = 44.dp).clip(Radius).clickable(role = Role.Button, onClick = onSkip)
                         .padding(horizontal = 12.dp),
@@ -232,7 +241,7 @@ private fun WelcomeStep() {
     Text("Cycler", style = MaterialTheme.typography.displaySmall)
     Spacer(Modifier.height(12.dp))
     Text(
-        "A cycling app that keeps everything on your phone. No account, no sign-up.",
+        "A cycling app that keeps your rides on your phone. No account, no sign-up.",
         style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Spacer(Modifier.height(28.dp))
@@ -247,10 +256,11 @@ private fun LocationStep(granted: Boolean) {
     StepHeader(
         Icons.Outlined.LocationOn, "Turn on location",
         "Cycler needs your location to show where you are on the map and to record your rides. " +
-            "Your rides stay on this phone, with no account, no analytics and no ads. Online requests: " +
+            "Your rides stay on this phone, with no account and no ads. Online requests: " +
             "weather sends your position rounded to about 100 m, place search sends what you type and a rounded position, " +
-            "route planning sends the points you plan between (a loop starts at your position), and map tiles show " +
-            "the map provider the area you view. See Privacy in Settings, About.",
+            "route planning sends the points you plan between (a loop starts at your position), map tiles show " +
+            "the map provider the area you view, and anonymous stats send counts and the general area (about 10 km) " +
+            "where rides start and end. See Settings → Privacy.",
     )
     Spacer(Modifier.height(20.dp))
     Text(
@@ -354,6 +364,40 @@ private fun GoalButton(icon: ImageVector, description: String, enabled: Boolean,
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, description, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha))
+    }
+}
+
+/** The one-time notice about anonymous stats: no off button here, only where to find it. */
+@Composable
+private fun StatsNoticeContent() {
+    StepHeader(
+        Icons.Outlined.Insights, "Anonymous stats",
+        "Cycler shares anonymous stats to help improve the app: features used, total distance, and the " +
+            "general area (about 10 km) you ride in. No names, routes, exact places or health data.",
+    )
+    Spacer(Modifier.height(20.dp))
+    Text(
+        "You can turn this off anytime in Settings → Privacy.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * The stats notice on its own, for riders who set up Cycler before it existed. Shown until Continue is
+ * tapped; Back leaves the app as usual and the notice comes back next time.
+ */
+@Composable
+fun StatsNoticeScreen(onContinue: () -> Unit) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                    .padding(start = 24.dp, end = 24.dp, top = 72.dp, bottom = 16.dp),
+            ) { StatsNoticeContent() }
+            Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp)) {
+                CyButton("Continue", onContinue, Modifier.fillMaxWidth())
+            }
+        }
     }
 }
 

@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cycler-stats",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  // Privacy: no Workers Logs, no traces, no Logpush, no tail workers.
+  // The worker itself never reads the client IP or any request header.
+  "observability": {
+    "enabled": false,
+    "logs": { "enabled": false, "invocation_logs": false },
+    "traces": { "enabled": false }
+  },
+  "logpush": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cycler-stats",
+      "database_id": "9b23cbdc-f98f-48f7-bd70-a229f98ba9ee",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

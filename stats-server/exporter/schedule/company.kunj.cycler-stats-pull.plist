@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS launchd agent: daily at 04:15; if the Mac was asleep, it runs on wake.
+     Replace /Users/me/cycler with where you cloned the repo, then:
+       cp company.kunj.cycler-stats-pull.plist ~/Library/LaunchAgents/
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/company.kunj.cycler-stats-pull.plist
+       launchctl kickstart gui/$(id -u)/company.kunj.cycler-stats-pull     # run once now
+     Remove: launchctl bootout gui/$(id -u)/company.kunj.cycler-stats-pull -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>company.kunj.cycler-stats-pull</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/me/cycler/stats-server/exporter/pull.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>15</integer>
+  </dict>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/me/cycler/stats-server/exporter/pull.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/me/cycler/stats-server/exporter/pull.log</string>
+</dict>
+</plist>

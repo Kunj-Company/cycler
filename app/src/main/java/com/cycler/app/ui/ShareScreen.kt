@@ -105,7 +105,11 @@ fun ShareScreen(vm: MainVm, id: String, startMode: Int = 0, startEditing: Boolea
     // The result of an export that finished while this screen was (re)attached.
     LaunchedEffect(videoState) {
         when (val v = videoState) {
-            is VideoState.Done -> { vm.video.value = VideoState.Idle; VideoExport.share(ctx, listOf(v.file), "video/mp4", v.caption) }
+            is VideoState.Done -> {
+                vm.video.value = VideoState.Idle
+                vm.stat(com.cycler.app.analytics.Feature.SHARE_VIDEO)
+                VideoExport.share(ctx, listOf(v.file), "video/mp4", v.caption)
+            }
             VideoState.Failed -> { vm.video.value = VideoState.Idle; Toast.makeText(ctx, "Couldn't make the video on this phone", Toast.LENGTH_LONG).show() }
             VideoState.Cancelled -> { vm.video.value = VideoState.Idle; Toast.makeText(ctx, "Export cancelled", Toast.LENGTH_SHORT).show() }
             else -> {}
@@ -274,6 +278,7 @@ fun ShareScreen(vm: MainVm, id: String, startMode: Int = 0, startEditing: Boolea
                                         val full = Cards.render(ctx, style, spec, m, rt.pts, photos, mapLight, mapDark)
                                         out.outputStream().use { full.compress(Bitmap.CompressFormat.PNG, 100, it) }
                                     }
+                                    vm.stat(com.cycler.app.analytics.Feature.SHARE_CARDS)
                                     VideoExport.share(ctx, listOf(out), "image/png", caption)
                                 }
                             },

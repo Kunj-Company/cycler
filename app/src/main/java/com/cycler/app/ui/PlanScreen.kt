@@ -408,6 +408,7 @@ private fun PlaceSearch(
     title: String, near: Pt?, offerMyLocation: Boolean,
     onMyLocation: () -> Unit, onPickOnMap: () -> Unit, onPlace: (Photon.Place) -> Unit, onClose: () -> Unit,
 ) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var places by remember { mutableStateOf(listOf<Photon.Place>()) }
     var searching by remember { mutableStateOf(false) }
@@ -466,7 +467,10 @@ private fun PlaceSearch(
                 }
                 items(places) { pl ->
                     Row(
-                        Modifier.fillMaxWidth().clickable { onPlace(pl) }.padding(horizontal = 20.dp, vertical = 14.dp),
+                        Modifier.fillMaxWidth().clickable {
+                            com.cycler.app.analytics.UsageStats.track(ctx, com.cycler.app.analytics.Feature.SEARCH)
+                            onPlace(pl)
+                        }.padding(horizontal = 20.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(Icons.Outlined.Place, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)

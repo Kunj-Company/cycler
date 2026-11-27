@@ -146,6 +146,7 @@ fun RoutesScreen(vm: MainVm, myLoc: Pt?) {
             }
             val rep = report
             if (id != null) {
+                vm.stat(com.cycler.app.analytics.Feature.ROUTE_IMPORT_GPX)
                 vm.detailId = id
                 if (rep != null && rep.skipped > 0) {
                     Toast.makeText(ctx, "Skipped ${rep.skipped} points with invalid coordinates", Toast.LENGTH_LONG).show()
@@ -314,6 +315,7 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
             if (!ok) withContext(Dispatchers.IO) {
                 runCatching { android.provider.DocumentsContract.deleteDocument(app.contentResolver, uri) }
             }
+            if (ok) vm.stat(when (format) { "fit" -> com.cycler.app.analytics.Feature.EXPORT_FIT; "tcx" -> com.cycler.app.analytics.Feature.EXPORT_TCX; else -> com.cycler.app.analytics.Feature.EXPORT_GPX })
             Toast.makeText(app, if (ok) "${format.uppercase()} file saved" else "Couldn't save the file", Toast.LENGTH_SHORT).show()
         }
     }
@@ -444,7 +446,7 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                             }
                             mine.forEach { (sf, e, best) ->
                                 Row(
-                                    Modifier.fillMaxWidth().clickable { vm.detailId = null; vm.showSegments = true; vm.segmentId = sf.seg.id }.padding(vertical = 8.dp),
+                                    Modifier.fillMaxWidth().clickable { vm.stat(com.cycler.app.analytics.Feature.SEGMENTS_OPENED); vm.detailId = null; vm.showSegments = true; vm.segmentId = sf.seg.id }.padding(vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(sf.seg.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -536,7 +538,10 @@ fun RouteDetailScreen(vm: MainVm, id: String) {
                                 if (share) scope.launch {
                                     val out = java.io.File(ctx.cacheDir, "share").apply { mkdirs() }.resolve(fileName(format))
                                     val ok = withContext(Dispatchers.IO) { runCatching { out.writeBytes(exportBytes(r, format)) }.isSuccess }
-                                    if (ok) com.cycler.app.share.VideoExport.share(ctx, listOf(out), "application/octet-stream", meta?.name ?: "")
+                                    if (ok) {
+                                        vm.stat(com.cycler.app.analytics.Feature.SHARE_FILE)
+                                        com.cycler.app.share.VideoExport.share(ctx, listOf(out), "application/octet-stream", meta?.name ?: "")
+                                    }
                                 } else { exportAs = format; export.launch(fileName(format)) }
                             }.padding(vertical = 10.dp),
                         ) {

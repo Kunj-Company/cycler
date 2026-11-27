@@ -194,8 +194,17 @@ fun CyclerMap(
     // No signal: the map style can't download. Fall back to a plain background so the
     // recorded track and the route being followed are still drawn.
     var styleFailed by remember(styleKey) { mutableStateOf(false) }
+    val statsCtx = LocalContext.current.applicationContext
+    // Counted once per map shown, not for each automatic retry.
+    var failCounted by remember { mutableStateOf(false) }
     DisposableEffect(mapView) {
-        val l = MapView.OnDidFailLoadingMapListener { styleFailed = true }
+        val l = MapView.OnDidFailLoadingMapListener {
+            styleFailed = true
+            if (!failCounted) {
+                failCounted = true
+                com.cycler.app.analytics.UsageStats.track(statsCtx, com.cycler.app.analytics.Feature.MAP_LOAD_FAILED)
+            }
+        }
         mapView.addOnDidFailLoadingMapListener(l)
         onDispose { mapView.removeOnDidFailLoadingMapListener(l) }
     }

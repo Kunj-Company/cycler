@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: a force-send hook for the anonymous stats, and plain http to the Mac running the emulator. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:networkSecurityConfig="@xml/network_security_config_debug">
+        <receiver
+            android:name=".analytics.DebugStatsReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="com.cycler.app.DEBUG_SEND_STATS" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

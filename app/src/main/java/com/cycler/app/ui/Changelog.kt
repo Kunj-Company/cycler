@@ -6,6 +6,13 @@ object Changelog {
 
     val versions: List<Version> = listOf(
         Version(
+            "Unreleased",
+            listOf(
+                "Anonymous stats: features used, total distance and the general area (about 10 km) you ride in, " +
+                    "to help improve the app. No names, routes, exact places or health data. Turn it off in Settings → Privacy.",
+            ),
+        ),
+        Version(
             "0.1.12",
             listOf(
                 "A ride now keeps recording if Android stops the app, and an interrupted ride is saved and shown.",

@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+exporter/.env
+exporter/data/
+exporter/pull.log
+metabase/.env
+dev/*.db
