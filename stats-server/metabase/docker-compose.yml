@@ -26,6 +26,7 @@ services:
       MB_DB_TYPE: h2
       MB_DB_FILE: /metabase-app/metabase.db   # Metabase's own settings, users and saved questions
       MB_ANON_TRACKING_ENABLED: "false"
+      MB_LOAD_SAMPLE_CONTENT: "false"   # no Sample Database or example dashboards on first start
       MB_CHECK_FOR_UPDATES: "false"
       MB_SITE_NAME: "Cycler stats"
       JAVA_TIMEZONE: UTC
