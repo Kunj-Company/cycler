@@ -62,6 +62,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.cycler.app.data.CareItem
 import com.cycler.app.data.Geo
 import com.cycler.app.data.Prefs
+import com.cycler.app.data.reassignBike
 import com.cycler.app.data.Pt
 import com.cycler.app.data.Route
 import com.cycler.app.data.RouteMeta
@@ -76,6 +77,7 @@ import com.cycler.app.track.TrackingService
 import com.cycler.app.track.locationFlow
 import com.cycler.app.ui.ActivityScreen
 import com.cycler.app.ui.BikeCareScreen
+import com.cycler.app.ui.BikesScreen
 import com.cycler.app.ui.Cy
 import com.cycler.app.ui.CyclerTheme
 import com.cycler.app.ui.Hairline
@@ -222,11 +224,71 @@ class MainVm(app: Application) : AndroidViewModel(app) {
     /** Period, sort, search and tag chosen on the Rides tab; kept while the app is open. */
     var rideFilter by mutableStateOf(com.cycler.app.data.RideFilter())
 
-    /** Experimental: the rider's bikes. One implicit bike until a second is added. */
+    /** The rider's bikes. One implicit bike until a second is added. */
     var bikes by mutableStateOf(prefs.bikes)
     fun saveBikes(list: com.cycler.app.data.BikeList) {
         bikes = list
         prefs.bikes = list
+    }
+    /** The Bikes page, and the bike whose jobs Bike care opens on (set by the bike's page, used once). */
+    var showBikes by mutableStateOf(false)
+    var careBike by mutableStateOf<String?>(null)
+    /** "Last used bike" or "Always the default bike": which bike the Ride screen offers first. */
+    var bikeNewRides by mutableStateOf(prefs.bikeNewRides)
+    /** The bike picked on the Ride screen for the next ride; null until the rider picks one. */
+    var rideBikeId by mutableStateOf<String?>(null)
+    /** True once the rider chose a routing profile by hand; a bike's type then stops suggesting one. */
+    var profileManual = false
+
+    /** The bike the next ride starts on: the rider's pick if it is still active, else last used or default. */
+    fun nextRideBike(): String =
+        bikes.active.firstOrNull { it.id == rideBikeId }?.id ?: bikes.preselect(bikeNewRides, prefs.lastBikeId)
+
+    fun pickRideBike(id: String) {
+        rideBikeId = id
+        applyBikeProfile(id)
+    }
+
+    /** Called when Start is pressed: hand the chosen bike to the recorder and remember it as the last used. */
+    fun commitRideBike() {
+        val id = if (bikes.multi) nextRideBike() else null
+        com.cycler.app.track.TrackingService.bikeId = id
+        if (id != null) prefs.lastBikeId = id
+        rideBikeId = null
+    }
+
+    /** Preselect the routing profile that suits the bike's type, unless the rider chose one by hand this session. */
+    fun applyBikeProfile(bikeId: String?) {
+        val p = com.cycler.app.data.BikeProfiles.forPlanning(bikes.find(bikeId), profileManual) ?: return
+        profile = p
+    }
+
+    fun setDefaultBike(id: String) {
+        saveBikes(bikes.setDefault(id))
+        applyBikeProfile(id)
+    }
+
+    /** The rider chose a routing profile in Settings or set-up: it stays, whatever bike is picked. */
+    fun chooseProfile(key: String) {
+        profileManual = true
+        profile = key
+        prefs.profile = key
+    }
+
+    /**
+     * Delete a bike after the rider confirmed: its rides and jobs move to the bike it hands over to, its picture
+     * is removed, and filters that pointed at it are cleared. False when the rules do not allow deleting it.
+     */
+    fun deleteBike(id: String): Boolean {
+        val del = bikes.delete(id) ?: return false
+        store.reassignBike(id, del.movedTo)
+        saveCare(care.reassignBike(id, del.movedTo))
+        saveBikes(del.list)
+        com.cycler.app.data.BikePhotos.remove(getApplication(), id)
+        if (rideFilter.bikeId == id) rideFilter = rideFilter.copy(bikeId = null)
+        if (rideBikeId == id) rideBikeId = null
+        if (prefs.lastBikeId == id) prefs.lastBikeId = ""
+        return true
     }
 
     fun saveCare(items: List<CareItem>) {
@@ -286,6 +348,8 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             // Never while a ride is being recorded (the file is the live ride), and never allowed to crash the app.
             if (TrackingService.state.value.status != TrackStatus.IDLE) return@launch
             val ctx = getApplication<Application>()
+            // A picture left behind by an add that was never finished, or by a bike that is gone.
+            runCatching { com.cycler.app.data.BikePhotos.prune(ctx, prefs.bikes.bikes.map { it.id }.toSet()) }
             runCatching {
                 when (val r = store.recoverUnfinishedResult()) {
                     is RouteStore.Recovery.Saved -> {
@@ -371,7 +435,11 @@ class MainVm(app: Application) : AndroidViewModel(app) {
             }
             val n = result.getOrNull()
             val bad = result.exceptionOrNull()
-            pendingBikes?.let { saveBikes(com.cycler.app.data.BikeList.restore(bikes, it)) }
+            pendingBikes?.let {
+                saveBikes(com.cycler.app.data.BikeList.restore(bikes, it))
+                // Pictures of bikes that did not make it into the list are not kept.
+                com.cycler.app.data.BikePhotos.prune(app, bikes.bikes.map { b -> b.id }.toSet())
+            }
             pendingCare?.let { saveCare(CareItem.parse(it)) }
             pendingPrefs?.let { if (prefs.importJson(it) > 0) reloadSettings() }
             restoring = false
@@ -733,11 +801,6 @@ fun App(vm: MainVm) {
         SegmentsScreen(vm)
         return
     }
-    if (vm.showCare) {
-        BackHandler { vm.showCare = false }
-        BikeCareScreen(vm)
-        return
-    }
     if (vm.showOffline) {
         BackHandler { vm.showOffline = false }
         OfflineScreen(vm, myLoc)
@@ -763,6 +826,17 @@ fun App(vm: MainVm) {
     if (detail != null) {
         BackHandler { vm.detailId = null }
         RouteDetailScreen(vm, detail)
+        return
+    }
+    // After the ride pages, so a ride opened from a bike's page shows on top and Back returns to the bike.
+    if (vm.showCare) {
+        BackHandler { vm.showCare = false; vm.careBike = null }
+        BikeCareScreen(vm)
+        return
+    }
+    if (vm.showBikes) {
+        BackHandler { vm.showBikes = false }
+        BikesScreen(vm) { vm.showBikes = false }
         return
     }
     if (vm.showSettings) {

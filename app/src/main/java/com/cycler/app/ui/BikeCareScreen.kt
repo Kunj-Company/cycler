@@ -101,16 +101,11 @@ fun BikeCareScreen(vm: MainVm, initialOpen: String? = null, now: Long = System.c
     val rides = remember(metas) { metas.filter { it.type == RouteType.RECORDED } }
     // null: the list; NEW: the add form; otherwise the id of the job being edited.
     var open by rememberSaveable { mutableStateOf(initialOpen) }
-    // Experimental multiple bikes: the bike whose jobs are shown (only when there is more than one).
-    var manageBikes by rememberSaveable { mutableStateOf(false) }
-    var pickedBike by rememberSaveable { mutableStateOf<String?>(null) }
+    // The bike whose jobs are shown (only when there is more than one); a bike's page can open this on it.
+    var pickedBike by rememberSaveable { mutableStateOf(vm.careBike) }
     val bikes = vm.bikes
     val bikeId = if (bikes.multi) bikes.find(pickedBike)?.id ?: bikes.defaultId else null
 
-    if (manageBikes) {
-        BikesScreen(vm) { manageBikes = false }
-        return
-    }
     if (open != null) {
         BackHandler { open = null }
         CareDetail(vm, if (open == NEW) null else open, rides, now, bikeId) { open = null }
@@ -132,7 +127,7 @@ fun BikeCareScreen(vm: MainVm, initialOpen: String? = null, now: Long = System.c
                 if (bikeId != null) {
                     item {
                         Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
-                            BikePicker(bikes, bikeId, { pickedBike = it }, label = "Bike (experimental)")
+                            BikePicker(bikes, bikeId, { pickedBike = it }, label = "Bike")
                             val t = bikes.totals(bikeId, rides)
                             Text(
                                 "%,.0f km on the odometer · %d ride%s · %s".format(t.odometerKm, t.rides, if (t.rides == 1) "" else "s", Fmt.dur(t.timeS)),
@@ -193,12 +188,12 @@ fun BikeCareScreen(vm: MainVm, initialOpen: String? = null, now: Long = System.c
                 if (rows.isNotEmpty()) item { Hairline(Modifier.padding(horizontal = 20.dp)) }
                 item {
                     Row(
-                        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { manageBikes = true }.padding(horizontal = 20.dp),
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { vm.showCare = false; vm.careBike = null; vm.showBikes = true }.padding(horizontal = 20.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(if (bikes.multi) "Bikes" else "Add a bike", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Text("Bikes", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                         Text(
-                            if (bikes.multi) "${bikes.bikes.size} bikes · Experimental" else "Experimental",
+                            if (bikes.multi) "${bikes.bikes.size} bikes" else "Add a bike",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Icon(
@@ -484,7 +479,7 @@ private fun DoneChooser(rides: List<RouteMeta>, now: Long, todayLabel: String, o
 /** Material 3 date picker, in the app's ink and blue, with no days in the future. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CareDatePicker(now: Long, onDismiss: () -> Unit, onPick: (Long) -> Unit) {
+internal fun CareDatePicker(now: Long, onDismiss: () -> Unit, onPick: (Long) -> Unit) {
     val latest = remember(now) { Care.todayAsUtcMidnight(now) }
     val state = rememberDatePickerState(
         initialSelectedDateMillis = latest,

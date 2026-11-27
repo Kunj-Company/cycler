@@ -336,6 +336,7 @@ private fun RideCard(vm: MainVm, m: RouteMeta) {
                     Text("$it ${Feeling.label(m.feeling)}", style = MaterialTheme.typography.labelMedium)
                 }
             }
+            vm.bikes.labelFor(m.bikeId)?.let { BikeChip(it, Modifier.padding(top = 6.dp)) }
             Text(
                 m.name, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 2.dp),
@@ -456,7 +457,7 @@ fun EditRideScreen(vm: MainVm, id: String) {
 
                 if (vm.bikes.multi) {
                     Spacer(Modifier.height(22.dp))
-                    BikePicker(vm.bikes, bike, { bike = it }, label = "Bike (experimental)", keep = meta.bikeId)
+                    BikePicker(vm.bikes, bike, { bike = it }, label = "Bike", keep = meta.bikeId)
                 }
 
                 Spacer(Modifier.height(22.dp))

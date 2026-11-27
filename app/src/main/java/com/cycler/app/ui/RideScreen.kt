@@ -129,8 +129,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
         vm.follow(null)
         vm.workout = null
         // Straight to the post-ride page: title, how it felt, notes, tags, photos.
-        // With several bikes the new ride starts on the current default bike.
-        if (vm.bikes.multi) vm.store.setBike(id, vm.bikes.defaultId)
+        // The recorder already saved it under the bike chosen at the start.
         vm.editIsNew = true
         vm.editId = id
     }
@@ -245,6 +244,7 @@ fun RideScreen(vm: MainVm, myLoc: Pt?, granted: Boolean, requestPermission: () -
                             follow = true
                             zoomed = false
                             TrackingService.workout = vm.workout
+                            vm.commitRideBike()
                             TrackingService.send(ctx, TrackingService.ACTION_START)
                         }
                     } else {
@@ -364,6 +364,16 @@ private fun IdlePanel(
             warning, style = MaterialTheme.typography.bodySmall, color = Cy.colors.warn,
             modifier = Modifier.padding(top = 6.dp),
         )
+    }
+    // With more than one bike: which one this ride is on. Held in rememberSaveable and the ViewModel, so it survives rotation.
+    if (vm.bikes.multi) {
+        var pickBike by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+        val chosen = vm.bikes.find(vm.nextRideBike())
+        if (chosen != null) RideBikeRow(chosen) { pickBike = true }
+        if (pickBike && chosen != null) {
+            val totals = remember(rides, vm.bikes) { vm.bikes.active.associate { it.id to vm.bikes.totals(it.id, rides) } }
+            BikePickerSheet(vm.bikes, chosen.id, totals, { vm.pickRideBike(it); pickBike = false }, { pickBike = false })
+        }
     }
     // An optional interval workout for this ride.
     var pickWorkout by remember { mutableStateOf(false) }
