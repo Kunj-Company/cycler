@@ -19,3 +19,8 @@ _to_delete/
 keystore.properties
 *.jks
 *.keystore
+
+# Release files
+*.aab
+*.apk
+dist/
