@@ -12,7 +12,7 @@ export interface Env {
   DB: D1Database;
 }
 
-const ROOT_TEXT = "Cycler anonymous stats endpoint. Privacy: https://github.com/Kunj-Company/cycler/blob/main/docs/PRIVACY.md\n";
+const ROOT_TEXT = "Cycler anonymous stats endpoint. Privacy: https://cycler.kunj.company/privacy.html#stats\n";
 
 function text(status: number, body: string | null, extra: Record<string, string> = {}): Response {
   return new Response(body, {

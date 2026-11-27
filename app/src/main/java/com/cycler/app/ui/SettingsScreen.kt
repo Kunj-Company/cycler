@@ -67,7 +67,7 @@ import java.util.Locale
 
 private const val HUB = "hub"
 private const val REPO_URL = "https://github.com/Kunj-Company/cycler"
-private const val PRIVACY_POLICY_URL = "https://github.com/Kunj-Company/cycler/blob/main/docs/PRIVACY.md"
+private const val PRIVACY_POLICY_URL = "https://cycler.kunj.company/privacy.html"
 
 /** Where the back arrow on each page leads. */
 private fun parentOf(page: String) = when (page) {

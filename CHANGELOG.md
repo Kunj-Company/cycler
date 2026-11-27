@@ -2,6 +2,29 @@
 
 All notable changes to Cycler. Versions are tagged in Git as `v0.1.N`.
 
+## 0.1.13
+
+First build for the Google Play closed test. Same release key as 0.1.10 to 0.1.12.
+
+### Added
+- **More than one bike.** Each bike has a profile and an optional photo. Pick the bike when
+  you start a ride, and see distance, rides and care jobs per bike. Bike care jobs and the
+  odometer belong to a bike. With a single bike nothing changes. Bikes are included in
+  backups.
+- A rain warning under the sunset warning when rain is likely.
+- **Anonymous usage stats**, on by default with a one-time notice, and off with one switch
+  in Settings → Privacy. Once a week the app sends counts of features used, rides and total
+  km, with a random stats ID, and separately, with no ID, the squares of about 10 km where
+  rides started and ended. Never sent: routes, exact places, names, notes, photos, speed,
+  heart rate or other health data, device IDs, or your IP address. Every field is listed in
+  [docs/ANALYTICS.md](docs/ANALYTICS.md); the server code is in `stats-server/`.
+- A quiet "support Cycler" card after a few rides, at most once every two weeks, and a
+  Website link in About. The Google Play build leaves the support card out.
+
+### Changed
+- The Privacy link opens the policy on the Cycler website
+  (https://cycler.kunj.company/privacy.html).
+
 ## 0.1.12
 
 Prepared for Google Play. Same release key as 0.1.10 and 0.1.11.

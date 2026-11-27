@@ -6,10 +6,14 @@ object Changelog {
 
     val versions: List<Version> = listOf(
         Version(
-            "Unreleased",
+            "0.1.13",
             listOf(
+                "More than one bike: give each bike a profile and photo, pick the bike for a ride, and see distance, rides and care per bike.",
+                "Bike care jobs and the odometer now belong to a bike. With one bike, nothing changes.",
+                "A rain warning appears under the sunset warning when rain is likely.",
                 "Anonymous stats: features used, total distance and the general area (about 10 km) you ride in, " +
                     "to help improve the app. No names, routes, exact places or health data. Turn it off in Settings → Privacy.",
+                "The Privacy link opens the policy on the Cycler website, and About links to the website.",
             ),
         ),
         Version(

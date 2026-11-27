@@ -20,8 +20,8 @@ android {
         applicationId = "com.cycler.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.1.12"
+        versionCode = 13
+        versionName = "0.1.13"
         // Show the "buy me a coffee" card and About link. Build without it with -PsupportPrompt=false.
         buildConfigField("boolean", "SUPPORT_PROMPT", (project.findProperty("supportPrompt") ?: "true").toString())
         // Anonymous weekly stats (see analytics/). Build with -PstatsUrl= (empty) to leave sending out entirely.
